@@ -46,7 +46,7 @@ jobs:
 
       - name: Build Web App & Bundle Assets into Android
         run: |
-          npm ci || npm install
+          npm ci || npm install --legacy-peer-deps
           npm run build
           mkdir -p ./android/app/src/main/assets
           cp -r ./dist/* ./android/app/src/main/assets/
