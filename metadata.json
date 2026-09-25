@@ -1,0 +1,6 @@
+{
+  "name": "SBS Travels Driver App",
+  "description": "Trip-based driver dispatch and meter platform for SBS Travels, powered by Get Taxi Basheer.",
+  "requestFramePermissions": ["geolocation"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
