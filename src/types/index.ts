@@ -42,6 +42,9 @@ export interface DriverProfile {
   currentLongitude?: number;
   lastLocationAt?: string;
   currentLocality?: string;
+  photoUrl?: string;
+  homeLocation?: string;
+  activationCode?: string;
 }
 
 // Per-Trip Server-Authoritative Tariff Configuration

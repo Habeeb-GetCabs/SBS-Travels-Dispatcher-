@@ -21,13 +21,17 @@ import {
   updateDriverOperationalStatus,
   fetchDriversForDispatch,
   createDriverAccount,
+  bindDriverAuthAccount,
   updateDriverActivation,
   fetchDevicesForDriver,
   registerDriverDevice,
   updateDriverDeviceStatus,
+  generateActivationCodeForDevice,
+  adminUpdateDriverCode,
+  adminUpdateDriverProfile,
 } from '../services/tripService';
 import { calculateHaversineKm } from '../services/gpsFilter';
-import { SBS_TRAVELS_SQL_SCHEMA } from '../services/schemaSql';
+import { SBS_TRAVELS_SQL_SCHEMA, SBS_DRIVER_AUTH_FIX_SQL } from '../services/schemaSql';
 import { createDefaultTariffConfig, calculateCustomTripFare } from '../services/tariffService';
 import {
   fetchPlacePredictions,
@@ -186,6 +190,50 @@ export const AdminDispatchModal: React.FC<Props> = ({
   const [isRegisteringDevice, setIsRegisteringDevice] = useState<boolean>(false);
   const [deviceError, setDeviceError] = useState<string | null>(null);
   const [deviceSuccess, setDeviceSuccess] = useState<string | null>(null);
+  const [isBindingDriverCode, setIsBindingDriverCode] = useState<string | null>(null);
+  const [copiedFixSql, setCopiedFixSql] = useState<boolean>(false);
+
+  // Phase 2.4: Device ID & Activation Code States
+  const [editingDriverCodeId, setEditingDriverCodeId] = useState<string | null>(null);
+  const [tempDriverCodeValue, setTempDriverCodeValue] = useState<string>('');
+  const [generatedActivationCodes, setGeneratedActivationCodes] = useState<Record<string, string>>({});
+  const [isGeneratingCode, setIsGeneratingCode] = useState<Record<string, boolean>>({});
+  const [copiedCodeNotice, setCopiedCodeNotice] = useState<string | null>(null);
+
+  const handleGenerateActivationCode = async (dId: string, devId: string) => {
+    setIsGeneratingCode((prev) => ({ ...prev, [dId]: true }));
+    try {
+      const res = await generateActivationCodeForDevice(dId, devId);
+      if (res.success && res.activationCode) {
+        setGeneratedActivationCodes((prev) => ({ ...prev, [dId]: res.activationCode! }));
+        const updatedList = await fetchDriversForDispatch();
+        if (updatedList) setFleetDrivers(updatedList);
+      } else {
+        alert(res.error || 'Failed to generate activation code.');
+      }
+    } catch (e: any) {
+      alert(e?.message || 'Error generating activation code.');
+    } finally {
+      setIsGeneratingCode((prev) => ({ ...prev, [dId]: false }));
+    }
+  };
+
+  const handleSaveDriverCode = async (driverId: string) => {
+    if (!tempDriverCodeValue.trim()) return;
+    try {
+      const res = await adminUpdateDriverCode(driverId, tempDriverCodeValue.trim());
+      if (res.success) {
+        setEditingDriverCodeId(null);
+        setTempDriverCodeValue('');
+        const updatedList = await fetchDriversForDispatch();
+        if (updatedList) setFleetDrivers(updatedList);
+      } else {
+        alert(res.error || 'Failed to update Driver ID.');
+      }
+    } catch (e: any) {
+      alert(e?.message || 'Error updating Driver ID.');
+    }
+  };
 
   useEffect(() => {
     if (activeTab === 'devices' && selectedDriverId) {
@@ -194,6 +242,28 @@ export const AdminDispatchModal: React.FC<Props> = ({
       fetchDevicesForDriver(selectedDriverId).then(setDriverDevicesList);
     }
   }, [activeTab, selectedDriverId]);
+
+  const handleBindDriverAuth = async (driverCode: string) => {
+    setIsBindingDriverCode(driverCode);
+    setProvisionError(null);
+    setProvisionSuccess(null);
+    try {
+      const res = await bindDriverAuthAccount(driverCode, 'SbsTravels@2026!');
+      if (res.success) {
+        setProvisionSuccess(
+          `Driver ${driverCode} successfully linked! Login: ${res.email || `${driverCode.toLowerCase()}@sbstravels.com`} | Password: SbsTravels@2026!`
+        );
+        const updatedList = await fetchDriversForDispatch();
+        if (updatedList) setFleetDrivers(updatedList);
+      } else {
+        setProvisionError(res.error || `Failed to bind auth for ${driverCode}.`);
+      }
+    } catch (err: any) {
+      setProvisionError(err?.message || `Error binding auth for ${driverCode}.`);
+    } finally {
+      setIsBindingDriverCode(null);
+    }
+  };
 
   const handleProvisionDriverSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -215,7 +285,11 @@ export const AdminDispatchModal: React.FC<Props> = ({
     if (!res.success) {
       setProvisionError(res.error || 'Failed to provision driver account.');
     } else {
-      setProvisionSuccess(`Driver ${res.driver?.name} (${res.driver?.driverCode}) provisioned successfully!`);
+      const loginEmail = res.loginEmail || `${res.driver?.driverCode.toLowerCase()}@sbstravels.com`;
+      const loginPassword = res.loginPassword || 'SbsTravels@2026!';
+      setProvisionSuccess(
+        `Driver ${res.driver?.name} (${res.driver?.driverCode}) provisioned & linked successfully! Login: ${loginEmail} | Password: ${loginPassword}`
+      );
       setNewDriverName('');
       setNewDriverMobile('');
       setNewDriverCode('');
@@ -1614,7 +1688,7 @@ export const AdminDispatchModal: React.FC<Props> = ({
                 <div className="flex items-center justify-between pb-1 border-b border-slate-900">
                   <div>
                     <h3 className="font-bold text-white text-sm">Fleet Driver & Live GPS Dispatch</h3>
-                    <p className="text-[11px] text-slate-400">Realtime driver availability and pickup proximity</p>
+                    <p className="text-[11px] text-slate-400">Realtime driver availability, device activation & dispatch</p>
                   </div>
                   <div className="flex items-center space-x-2">
                     <button
@@ -1631,6 +1705,13 @@ export const AdminDispatchModal: React.FC<Props> = ({
                     </span>
                   </div>
                 </div>
+
+                {copiedCodeNotice && (
+                  <div className="bg-sky-950/80 border border-sky-500/60 p-2 rounded-xl text-sky-300 font-bold text-xs flex items-center space-x-1.5 animate-in fade-in">
+                    <Check className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                    <span>{copiedCodeNotice}</span>
+                  </div>
+                )}
 
                 {/* Provision Driver Form Panel (Phase 2.3.4) */}
                 {showProvisionModal && (
@@ -1830,23 +1911,77 @@ export const AdminDispatchModal: React.FC<Props> = ({
                         >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center space-x-2.5">
-                              <div className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center font-black">
-                                {d.name.charAt(0)}
-                              </div>
+                              {d.photoUrl ? (
+                                <img
+                                  src={d.photoUrl}
+                                  alt={d.name}
+                                  className="w-11 h-11 rounded-xl object-cover border border-slate-700 shadow-sm shrink-0"
+                                />
+                              ) : (
+                                <div className="w-11 h-11 rounded-xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center font-black shrink-0 text-base">
+                                  {d.name.charAt(0)}
+                                </div>
+                              )}
                               <div>
-                                <div className="flex items-center space-x-2">
+                                <div className="flex items-center space-x-2 flex-wrap gap-y-1">
                                   <span className="font-bold text-white text-sm">{d.name}</span>
-                                  <span className="bg-slate-800 text-slate-300 font-mono text-[10px] px-1.5 py-0.5 rounded">
-                                    {d.driverCode}
-                                  </span>
+                                  {editingDriverCodeId === d.id ? (
+                                    <div className="flex items-center space-x-1">
+                                      <input
+                                        type="text"
+                                        value={tempDriverCodeValue}
+                                        onChange={(e) => setTempDriverCodeValue(e.target.value.toUpperCase())}
+                                        className="w-20 bg-slate-900 border border-sky-500 rounded px-1.5 py-0.5 text-[10px] font-mono font-bold text-white uppercase focus:outline-none"
+                                        placeholder="DRV007"
+                                        autoFocus
+                                      />
+                                      <button
+                                        type="button"
+                                        onClick={() => handleSaveDriverCode(d.id)}
+                                        className="px-2 py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] shadow"
+                                      >
+                                        Save
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() => setEditingDriverCodeId(null)}
+                                        className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-400 text-[10px]"
+                                      >
+                                        ✕
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center space-x-1">
+                                      <span className="bg-slate-800 text-sky-300 font-mono text-[10px] px-1.5 py-0.5 rounded font-bold border border-slate-700">
+                                        {d.driverCode}
+                                      </span>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setEditingDriverCodeId(d.id);
+                                          setTempDriverCodeValue(d.driverCode);
+                                        }}
+                                        className="text-[10px] text-sky-400 hover:text-sky-300 font-semibold underline ml-0.5"
+                                        title="Master Admin: Change Driver ID (e.g. to DRV007)"
+                                      >
+                                        Edit ID
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                                 <p className="text-[11px] text-slate-400 font-mono">
                                   {d.mobile} • {d.vehicleNumber} ({d.vehicleModel || 'Taxi'})
                                 </p>
+                                {d.homeLocation && (
+                                  <div className="flex items-center space-x-1 mt-0.5 text-[10px] text-emerald-400 font-medium">
+                                    <MapPin className="w-3 h-3 text-emerald-400 shrink-0" />
+                                    <span>Home: {d.homeLocation}</span>
+                                  </div>
+                                )}
                               </div>
                             </div>
 
-                             <div className="flex items-center space-x-2">
+                             <div className="flex items-center space-x-2 shrink-0">
                               {/* WhatsApp Dispatch Button */}
                               <button
                                 type="button"
@@ -1959,39 +2094,103 @@ export const AdminDispatchModal: React.FC<Props> = ({
                             </div>
                           </div>
 
-                          {/* Device Activation & Auth Binding Bar (Phase 2.3.4) */}
-                          <div className="pt-2 border-t border-slate-900/60 flex items-center justify-between text-[10px]">
-                            <div className="flex items-center space-x-2">
-                              <span className="text-slate-500 font-semibold">Device:</span>
-                              <span className={`px-1.5 py-0.5 rounded font-mono font-bold ${
+                          {/* Device Activation & Activation Code Delivery Bar (Phase 2.4) */}
+                          <div className="pt-2 border-t border-slate-900/60 flex items-center justify-between text-[10px] gap-2 flex-wrap bg-slate-900/40 p-2.5 rounded-xl border border-slate-800/80">
+                            <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                              <span className="text-slate-400 font-bold uppercase text-[9px]">Device:</span>
+                              <span className={`px-2 py-0.5 rounded font-mono font-bold text-[10px] ${
                                 d.activationStatus === 'ACTIVE'
                                   ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                                  : 'bg-rose-500/20 text-rose-400 border border-rose-500/30'
+                                  : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
                               }`}>
                                 {d.activationStatus || 'ACTIVE'}
                               </span>
-                              <span className="text-slate-500 font-mono text-[9px] truncate max-w-[140px]">
-                                {d.authUserId ? `Auth: ${d.authUserId.slice(0, 8)}...` : 'Awaiting Auth Bind'}
+                              <span className="font-mono text-slate-300 bg-slate-950 px-2 py-0.5 rounded border border-slate-800 text-[10px] font-bold">
+                                {d.deviceId}
                               </span>
+                              {d.deviceId && d.deviceId !== 'Unavailable/Not Registered' && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(d.deviceId);
+                                    setCopiedCodeNotice(`Copied Device ID: ${d.deviceId}`);
+                                    setTimeout(() => setCopiedCodeNotice(null), 2500);
+                                  }}
+                                  className="text-slate-400 hover:text-white"
+                                  title="Copy Device ID"
+                                >
+                                  <Copy className="w-3 h-3" />
+                                </button>
+                              )}
                             </div>
 
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                const nextStatus = d.activationStatus === 'ACTIVE' ? 'DEACTIVATED' : 'ACTIVE';
-                                await updateDriverActivation(d.id, nextStatus as DeviceActivationStatus);
-                                fetchDriversForDispatch().then((list) => {
-                                  if (list) setFleetDrivers(list);
-                                });
-                              }}
-                              className={`px-2 py-0.5 rounded font-bold transition text-[9px] ${
-                                d.activationStatus === 'ACTIVE'
-                                  ? 'bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800'
-                                  : 'bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border border-emerald-800'
-                              }`}
-                            >
-                              {d.activationStatus === 'ACTIVE' ? 'Deactivate Device' : 'Activate Device'}
-                            </button>
+                            <div className="flex items-center space-x-2 flex-wrap gap-1.5">
+                              {/* If activation code exists or was generated */}
+                              {(generatedActivationCodes[d.id] || d.activationCode) ? (
+                                <div className="flex items-center space-x-1.5 bg-sky-950/80 border border-sky-500/50 px-2.5 py-1 rounded-xl">
+                                  <Key className="w-3.5 h-3.5 text-sky-400 shrink-0" />
+                                  <span className="text-slate-400 font-bold text-[9px] uppercase">Code:</span>
+                                  <span className="font-mono font-black text-amber-300 text-xs tracking-wider">
+                                    {generatedActivationCodes[d.id] || d.activationCode}
+                                  </span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const codeToCopy = generatedActivationCodes[d.id] || d.activationCode || '';
+                                      navigator.clipboard.writeText(codeToCopy);
+                                      setCopiedCodeNotice(`Copied Code: ${codeToCopy}`);
+                                      setTimeout(() => setCopiedCodeNotice(null), 2500);
+                                    }}
+                                    className="text-slate-300 hover:text-white ml-1"
+                                    title="Copy Code"
+                                  >
+                                    <Copy className="w-3 h-3" />
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const code = generatedActivationCodes[d.id] || d.activationCode || '';
+                                      const msg = `SBS Travels Dispatch: Hello ${d.name}, your Device Activation Code is: *${code}*. Please enter this code in your SBS Driver App to activate your mobile device (${d.deviceId}).`;
+                                      openWhatsApp(d.mobile, msg);
+                                    }}
+                                    className="px-2 py-0.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-[10px] font-bold flex items-center space-x-1 transition ml-1 shadow-sm"
+                                    title="Send Activation Code via WhatsApp"
+                                  >
+                                    <MessageSquare className="w-3 h-3" />
+                                    <span>WhatsApp Code</span>
+                                  </button>
+                                </div>
+                              ) : (
+                                <button
+                                  type="button"
+                                  disabled={isGeneratingCode[d.id]}
+                                  onClick={() => handleGenerateActivationCode(d.id, d.deviceId)}
+                                  className="px-2.5 py-1 rounded-xl font-bold text-[10px] bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-sm transition flex items-center space-x-1 active:scale-95"
+                                  title="Generate 6-digit Activation Code bound to this Device ID"
+                                >
+                                  <Key className="w-3 h-3" />
+                                  <span>{isGeneratingCode[d.id] ? 'Generating...' : 'Create Activation Code'}</span>
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  const nextStatus = d.activationStatus === 'ACTIVE' ? 'DEACTIVATED' : 'ACTIVE';
+                                  await updateDriverActivation(d.id, nextStatus as DeviceActivationStatus);
+                                  fetchDriversForDispatch().then((list) => {
+                                    if (list) setFleetDrivers(list);
+                                  });
+                                }}
+                                className={`px-2 py-1 rounded-xl font-bold transition text-[9px] ${
+                                  d.activationStatus === 'ACTIVE'
+                                    ? 'bg-rose-950/60 hover:bg-rose-900 text-rose-300 border border-rose-800'
+                                    : 'bg-emerald-950/60 hover:bg-emerald-900 text-emerald-300 border border-emerald-800'
+                                }`}
+                              >
+                                {d.activationStatus === 'ACTIVE' ? 'Deactivate' : 'Authorize'}
+                              </button>
+                            </div>
                           </div>
                         </div>
                       );
@@ -2393,10 +2592,39 @@ export const AdminDispatchModal: React.FC<Props> = ({
 
           {/* TAB 4: SQL Master Setup */}
           {activeTab === 'sql' && (
-            <div className="space-y-3 text-xs">
-              <div className="flex items-center justify-between">
+            <div className="space-y-4 text-xs">
+              {/* Highlighted Driver Login Fix SQL */}
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-amber-500/10 via-amber-600/5 to-slate-900 border border-amber-500/30 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="font-bold text-amber-300 text-sm flex items-center space-x-2">
+                      <Key className="w-4 h-4 text-amber-400" />
+                      <span>1-Click Driver Login &amp; Auth Fix SQL</span>
+                    </h3>
+                    <p className="text-[11px] text-slate-300 mt-0.5">
+                      Instantly provisions &amp; binds Supabase Auth accounts for <strong>DRV002</strong> and all fleet drivers with password <code className="text-amber-300 font-mono">SbsTravels@2026!</code>.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      navigator.clipboard.writeText(SBS_DRIVER_AUTH_FIX_SQL);
+                      setCopiedFixSql(true);
+                      setTimeout(() => setCopiedFixSql(false), 2500);
+                    }}
+                    className="px-3 py-1.5 rounded-xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-xs flex items-center space-x-1.5 shadow-md transition shrink-0"
+                  >
+                    {copiedFixSql ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedFixSql ? 'Copied Driver Fix' : 'Copy Driver Fix SQL'}</span>
+                  </button>
+                </div>
+                <pre className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 font-mono text-[9px] text-amber-200/90 max-h-36 overflow-auto whitespace-pre">
+                  {SBS_DRIVER_AUTH_FIX_SQL}
+                </pre>
+              </div>
+
+              <div className="flex items-center justify-between pt-2">
                 <div>
-                  <h3 className="font-bold text-white">PostgreSQL Schema &amp; RPCs</h3>
+                  <h3 className="font-bold text-white">Full Database Schema &amp; RPCs</h3>
                   <p className="text-[11px] text-slate-400">
                     Run in Supabase Dashboard SQL Editor
                   </p>

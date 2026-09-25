@@ -53,23 +53,52 @@ import {
   subscribeToTripsRealtime,
   fetchOpenTripsForDriver,
   updateDriverLocationAndStatus,
-  ShiftMetrics
+  fetchDriversForDispatch,
+  ShiftMetrics,
+  registerDriverOnboarding,
+  generateActivationCodeForDevice,
+  activateDriverWithCode,
+  getOrCreateDeviceId,
+  adminUpdateDriverProfile,
 } from './services/tripService';
 import { AdminDispatchModal } from './components/AdminDispatchModal';
 import { TripDetails } from './components/TripDetails';
 import { ActiveTripMeter } from './components/ActiveTripMeter';
 import { TripSummaryModal } from './components/TripSummaryModal';
 import { soundEngine } from './services/audioService';
-import { SBS_TRAVELS_SQL_SCHEMA } from './services/schemaSql';
+import { notificationService } from './services/notificationService';
+import { SBS_TRAVELS_SQL_SCHEMA, SBS_DRIVER_AUTH_FIX_SQL } from './services/schemaSql';
 import {
   verifyDriverSession,
   signInDriver,
   signOutDriver,
   onDriverAuthStateChange,
   getDriverSession,
+  ensureDriverAuthAccount,
 } from './services/authService';
 import { Session } from '@supabase/supabase-js';
-import { Copy, Check, Lock, UserCheck, LogIn } from 'lucide-react';
+import {
+  Copy,
+  Check,
+  Lock,
+  UserCheck,
+  LogIn,
+  Eye,
+  EyeOff,
+  Wrench,
+  Camera,
+  Upload,
+  Bell,
+  BellRing,
+  Volume2,
+  VolumeX,
+  Smartphone,
+  MapPin,
+  Trash2,
+  MessageSquare,
+  Shield,
+  Send,
+} from 'lucide-react';
 
 export default function App() {
   // Supabase Configuration State (Phase 2.3.5 Clean Driver UI)
@@ -81,15 +110,38 @@ export default function App() {
   const [activeTrip, setActiveTripState] = useState<Trip | null>(getActiveTrip());
   const [completedSummary, setCompletedSummary] = useState<CompletedTripData | null>(null);
 
-  // Driver Supabase Authentication State (Phase 2.2C)
-  const [driverSession, setDriverSession] = useState<Session | null>(null);
-  const [isDriverAuthLoading, setIsDriverAuthLoading] = useState<boolean>(true);
-  const [driverAuthError, setDriverAuthError] = useState<string | null>(null);
-  const [showDriverLoginModal, setShowDriverLoginModal] = useState<boolean>(false);
-  const [driverLoginEmail, setDriverLoginEmail] = useState<string>('');
-  const [driverLoginPassword, setDriverLoginPassword] = useState<string>('');
-  const [isDriverLoggingIn, setIsDriverLoggingIn] = useState<boolean>(false);
-  const [isDriverUnlinked, setIsDriverUnlinked] = useState<boolean>(false);
+  // Phase 2.4 Device ID & No-Password Driver Onboarding States
+  const [showDriverOnboardModal, setShowDriverOnboardModal] = useState<boolean>(false);
+  const [onboardTab, setOnboardTab] = useState<'signup' | 'activate'>('signup');
+  const [signupName, setSignupName] = useState<string>('');
+  const [signupMobile, setSignupMobile] = useState<string>('');
+  const [signupVehNo, setSignupVehNo] = useState<string>('');
+  const [signupVehModel, setSignupVehModel] = useState<string>('Maruti Tour S');
+  const [signupHomeLocation, setSignupHomeLocation] = useState<string>('Gandhipuram, Coimbatore');
+  const [signupPhotoUrl, setSignupPhotoUrl] = useState<string>('');
+  const [isSubmittingSignup, setIsSubmittingSignup] = useState<boolean>(false);
+  const [signupError, setSignupError] = useState<string | null>(null);
+  const [signupSuccess, setSignupSuccess] = useState<string | null>(null);
+
+  // Activation Code Verification
+  const [inputActivationCode, setInputActivationCode] = useState<string>('');
+  const [isActivatingDevice, setIsActivatingDevice] = useState<boolean>(false);
+  const [activationError, setActivationError] = useState<string | null>(null);
+  const [activationSuccess, setActivationSuccess] = useState<string | null>(null);
+  const [copiedDeviceId, setCopiedDeviceId] = useState<boolean>(false);
+
+  // Broadcast Alert & Inline Claim States
+  const [inlineTripClaimOtps, setInlineTripClaimOtps] = useState<Record<string, string>>({});
+  const [inlineClaimingTripId, setInlineClaimingTripId] = useState<string | null>(null);
+  const [inlineClaimError, setInlineClaimError] = useState<Record<string, string>>({});
+  const [broadcastAlertNotice, setBroadcastAlertNotice] = useState<string | null>(null);
+
+  // Driver Edit Modal extra fields
+  const [editHomeLocation, setEditHomeLocation] = useState<string>(driver.homeLocation || '');
+  const [editPhotoUrl, setEditPhotoUrl] = useState<string>(driver.photoUrl || '');
+
+  // Track previous open trips for audio and visual chimes
+  const prevTripIdsRef = React.useRef<Set<string>>(new Set());
 
   // UI Modals & Navigation
   const [activeTab, setActiveTab] = useState<'home' | 'history' | 'about'>('home');
@@ -165,7 +217,29 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  const handleSaveDriverProfile = (e: React.FormEvent) => {
+  const handlePhotoGallerySelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) setSignupPhotoUrl(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleEditPhotoGallerySelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const dataUrl = event.target?.result as string;
+      if (dataUrl) setEditPhotoUrl(dataUrl);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleSaveDriverProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     const updated: DriverProfile = {
       ...driver,
@@ -174,10 +248,106 @@ export default function App() {
       vehicleNumber: editVehicleNumber.trim() || driver.vehicleNumber,
       vehicleModel: editVehicleModel.trim() || driver.vehicleModel,
       driverCode: editDriverCode.trim() || driver.driverCode,
+      homeLocation: editHomeLocation.trim() || driver.homeLocation,
+      photoUrl: editPhotoUrl || driver.photoUrl,
     };
     saveDriverProfile(updated);
     setDriver(updated);
     setShowDriverEditModal(false);
+
+    if (isSupabaseConfigured() && driver.id && !driver.id.startsWith('drv-')) {
+      await adminUpdateDriverProfile(driver.id, {
+        name: updated.name,
+        mobile: updated.mobile,
+        vehicleNumber: updated.vehicleNumber,
+        vehicleModel: updated.vehicleModel,
+        homeLocation: updated.homeLocation,
+        photoUrl: updated.photoUrl,
+      });
+    }
+  };
+
+  const handleOnboardingSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsSubmittingSignup(true);
+    setSignupError(null);
+    setSignupSuccess(null);
+    try {
+      const res = await registerDriverOnboarding({
+        name: signupName,
+        mobile: signupMobile,
+        vehicleNumber: signupVehNo,
+        vehicleModel: signupVehModel,
+        homeLocation: signupHomeLocation,
+        photoUrl: signupPhotoUrl,
+        deviceId: driver.deviceId,
+      });
+
+      if (res.success && res.driver) {
+        setDriver(res.driver);
+        saveDriverProfile(res.driver);
+        setSignupSuccess(
+          `Registered successfully as ${res.driver.driverCode}! Please share your Device ID with Dispatch to get your Activation Code.`
+        );
+        setOnboardTab('activate');
+      } else {
+        setSignupError(res.error || 'Failed to submit driver registration.');
+      }
+    } catch (err: any) {
+      setSignupError(err?.message || 'Error submitting registration.');
+    } finally {
+      setIsSubmittingSignup(false);
+    }
+  };
+
+  const handleActivateDeviceSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsActivatingDevice(true);
+    setActivationError(null);
+    setActivationSuccess(null);
+    try {
+      const res = await activateDriverWithCode(driver.id, driver.deviceId, inputActivationCode);
+      if (res.success) {
+        soundEngine.playClaimSuccess();
+        const updated = { ...driver, activationStatus: 'ACTIVE' as const };
+        setDriver(updated);
+        saveDriverProfile(updated);
+        setActivationSuccess('Device successfully authorized & activated! You can now claim trips.');
+        setTimeout(() => setShowDriverOnboardModal(false), 1600);
+      } else {
+        setActivationError(res.error || 'Invalid activation code for this device.');
+      }
+    } catch (err: any) {
+      setActivationError(err?.message || 'Error verifying activation code.');
+    } finally {
+      setIsActivatingDevice(false);
+    }
+  };
+
+  const handleInlineClaimTrip = async (tripId: string) => {
+    const otp = (inlineTripClaimOtps[tripId] || '').trim();
+    if (!otp || otp.length < 4) {
+      setInlineClaimError((prev) => ({ ...prev, [tripId]: 'Please enter the 6-digit Trip Access OTP.' }));
+      return;
+    }
+    setInlineClaimError((prev) => ({ ...prev, [tripId]: '' }));
+    setInlineClaimingTripId(tripId);
+    try {
+      const res = await claimTripWithOtp(otp, driver);
+      if (res.success && res.trip) {
+        soundEngine.playClaimSuccess();
+        setActiveTripState(res.trip);
+        const updatedDriver = { ...driver, operationalStatus: 'HAS_TRIP' as const };
+        setDriver(updatedDriver);
+        saveDriverProfile(updatedDriver);
+      } else {
+        setInlineClaimError((prev) => ({ ...prev, [tripId]: res.error || 'Failed to claim trip.' }));
+      }
+    } catch (err: any) {
+      setInlineClaimError((prev) => ({ ...prev, [tripId]: err?.message || 'Error claiming trip.' }));
+    } finally {
+      setInlineClaimingTripId(null);
+    }
   };
 
   // Active Trip Recovery on startup, Driver Session verification, & Realtime Listener (Sections 33, 36)
@@ -197,54 +367,102 @@ export default function App() {
       })
       .catch(() => {});
 
-    // 1. Authoritative Driver Supabase Session Verification (Phase 2.2C)
-    if (isSupabaseConfigured()) {
-      verifyDriverSession().then(({ session, profile, isLinked }) => {
-        setDriverSession(session);
-        if (profile) {
-          setDriver(profile);
-          setIsDriverUnlinked(false);
-        } else if (session && !isLinked) {
-          setIsDriverUnlinked(true);
-        }
-        setIsDriverAuthLoading(false);
-      });
-
-      const unsubscribeAuth = onDriverAuthStateChange((session, profile) => {
-        setDriverSession(session);
-        if (profile) {
-          setDriver(profile);
-          setIsDriverUnlinked(false);
-        } else if (session) {
-          setIsDriverUnlinked(true);
-        } else {
-          setIsDriverUnlinked(false);
-        }
-      });
+    // 1. Authoritative Driver Device Profile Verification from Supabase
+    if (isSupabaseConfigured() && supabase) {
+      const currentDevId = driver.deviceId || getOrCreateDeviceId();
+      supabase
+        .from('driver_devices')
+        .select('*, drivers(*)')
+        .eq('device_fingerprint', currentDevId)
+        .limit(1)
+        .then(
+          ({ data }) => {
+            if (data && data.length > 0) {
+              const dev = data[0];
+              const d = dev.drivers;
+              if (d) {
+                const updatedProfile: DriverProfile = {
+                  id: d.id,
+                  driverCode: d.driver_code,
+                  name: d.name,
+                  mobile: d.mobile,
+                  vehicleNumber: d.vehicle_number,
+                  vehicleModel: d.vehicle_model || 'Taxi',
+                  homeLocation: d.home_location || driver.homeLocation,
+                  photoUrl: d.photo_url || driver.photoUrl,
+                  operationalStatus: d.operational_status || driver.operationalStatus,
+                  activationStatus: dev.status || d.activation_status || 'PENDING',
+                  deviceId: currentDevId,
+                };
+                setDriver(updatedProfile);
+                saveDriverProfile(updatedProfile);
+              }
+            }
+          },
+          () => {}
+        );
 
       // 2. Listen to Supabase Realtime changes
-      fetchOpenTripsForDriver().then(setOpenTripsList);
+      const updateOpenTripsWithAlerts = (trips: Trip[]) => {
+        setOpenTripsList(trips);
+        const currentIds = new Set(trips.map((t) => t.id));
+        const prevIds = prevTripIdsRef.current;
+        const brandNewTrips = trips.filter((t) => !prevIds.has(t.id));
+
+        if (brandNewTrips.length > 0 && prevIds.size > 0) {
+          // Play trip notification tone
+          soundEngine.playNewTripAlert();
+          soundEngine.triggerHaptic([200, 100, 200, 100, 300]);
+
+          const newest = brandNewTrips[0];
+          setBroadcastAlertNotice(
+            `⚡ NEW TRIP BROADCAST: ${newest.tripNumber} • ${newest.pickupAddress} (₹${newest.estimatedFare})`
+          );
+          setTimeout(() => setBroadcastAlertNotice(null), 8000);
+
+          notificationService.notify({
+            type: 'NEW_TRIP',
+            target: 'DRIVER',
+            title: `🚕 New Trip Broadcast: ${newest.tripNumber}`,
+            message: `${newest.pickupAddress} → ${newest.dropAddress} (Fare: ₹${newest.estimatedFare})`,
+            tripId: newest.id,
+            tripNumber: newest.tripNumber,
+            sound: true,
+          });
+        }
+        prevTripIdsRef.current = currentIds;
+      };
+
+      fetchOpenTripsForDriver().then((trips) => {
+        setOpenTripsList(trips);
+        prevTripIdsRef.current = new Set(trips.map((t) => t.id));
+      });
 
       const unsubscribeTrips = subscribeToTripsRealtime(() => {
         setCompletedList(getCompletedTrips());
         setShiftMetrics(getTodayShiftMetrics());
         if (isSupabaseConfigured()) {
-          fetchOpenTripsForDriver().then(setOpenTripsList);
+          fetchOpenTripsForDriver().then(updateOpenTripsWithAlerts);
         }
       });
 
+      // Active poll every 8 seconds to ensure real-time broadcast delivery even if websocket pauses
+      const pollInterval = setInterval(() => {
+        if (isSupabaseConfigured()) {
+          fetchOpenTripsForDriver().then(updateOpenTripsWithAlerts);
+        }
+      }, 8000);
+
       return () => {
-        unsubscribeAuth();
         unsubscribeTrips();
+        clearInterval(pollInterval);
       };
-    } else {
-      setIsDriverAuthLoading(false);
     }
   }, []);
 
   // Driver Live GPS Location & Operational Status Synchronization (Phase 2.3.2)
   useEffect(() => {
-    if (!driverSession || driver.operationalStatus === 'OFFLINE' || typeof window === 'undefined' || !navigator.geolocation) {
+    if (driver.operationalStatus === 'OFFLINE' || typeof window === 'undefined' || !navigator.geolocation) {
       return;
     }
 
@@ -282,38 +500,7 @@ export default function App() {
         navigator.geolocation.clearWatch(watchId);
       }
     };
-  }, [driverSession, driver.id, driver.operationalStatus]);
-
-  // Driver Login Handler (Phase 2.2C)
-  const handleDriverLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setDriverAuthError(null);
-    setIsDriverLoggingIn(true);
-    try {
-      const res = await signInDriver(driverLoginEmail, driverLoginPassword);
-      if (res.success && res.profile) {
-        setDriver(res.profile);
-        setDriverSession(res.session || null);
-        setShowDriverLoginModal(false);
-        setDriverLoginPassword('');
-        setIsDriverUnlinked(false);
-      } else {
-        setDriverAuthError(res.error || 'Invalid driver credentials.');
-      }
-    } catch (err: any) {
-      setDriverAuthError(err?.message || 'Driver authentication error.');
-    } finally {
-      setIsDriverLoggingIn(false);
-    }
-  };
-
-  // Driver Sign-Out Handler (Phase 2.2C)
-  const handleDriverSignOut = async () => {
-    await signOutDriver();
-    setDriverSession(null);
-    setIsDriverUnlinked(false);
-    setDriver(getStoredDriverProfile());
-  };
+  }, [driver.id, driver.operationalStatus]);
 
   // Handle manual sync of pending offline completed trips
   const handleSyncPendingTrips = async () => {
@@ -468,11 +655,35 @@ export default function App() {
                 </button>
 
                 <button
+                  onClick={() => {
+                    setOnboardTab('signup');
+                    setShowDriverOnboardModal(true);
+                    setShowHamburgerMenu(false);
+                  }}
+                  className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:bg-slate-800/60 text-slate-300 transition"
+                >
+                  <PlusCircle className="w-4 h-4 text-emerald-400" />
+                  <span>DRIVER ONBOARDING (SIGN UP)</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    setOnboardTab('activate');
+                    setShowDriverOnboardModal(true);
+                    setShowHamburgerMenu(false);
+                  }}
+                  className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:bg-slate-800/60 text-slate-300 transition"
+                >
+                  <Smartphone className="w-4 h-4 text-sky-400" />
+                  <span>DEVICE ID &amp; ACTIVATION</span>
+                </button>
+
+                <button
                   onClick={() => { setShowDriverEditModal(true); setShowHamburgerMenu(false); }}
                   className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:bg-slate-800/60 text-slate-300 transition"
                 >
                   <User className="w-4 h-4 text-slate-400" />
-                  <span>MY PROFILE</span>
+                  <span>MY PROFILE &amp; LOCATION</span>
                 </button>
 
                 <button
@@ -518,18 +729,8 @@ export default function App() {
             </div>
 
             <div className="pt-4 border-t border-slate-800/80 space-y-3">
-              {isConfigured && driverSession?.user && (
-                <button
-                  type="button"
-                  onClick={() => { handleDriverSignOut(); setShowHamburgerMenu(false); }}
-                  className="w-full flex items-center justify-center space-x-2 py-2.5 bg-rose-950/40 text-rose-300 font-bold rounded-xl border border-rose-800/50 hover:bg-rose-900/40 transition text-xs shadow-sm"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>LOGOUT DRIVER</span>
-                </button>
-              )}
               <div className="text-center text-[10px] text-slate-500 font-semibold">
-                SBS Travels Driver App v2.3.4
+                SBS Travels Driver App v2.4 (Device ID Auth)
               </div>
             </div>
           </div>
@@ -564,69 +765,114 @@ export default function App() {
         {/* CASE 3: NO ACTIVE TRIP -> HOME SCREEN */}
         {!activeTrip && activeTab === 'home' && (
           <div className="space-y-4">
-            {/* 1. DRIVER PROFILE CARD */}
-            <div className="bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#1e293b] border border-slate-700/60 rounded-2xl p-4 shadow-lg space-y-3">
-              <div className="flex items-start justify-between">
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Driver Profile
-                    </span>
-                    {isConfigured && (
-                      driverSession?.user && driver.authUserId ? (
-                        <span className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/10 border border-emerald-500/30 text-emerald-400">
-                          <UserCheck className="w-3 h-3 text-emerald-400" />
-                          <span>Verified</span>
-                        </span>
-                      ) : (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setDriverAuthError(null);
-                            setShowDriverLoginModal(true);
-                          }}
-                          className="inline-flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 text-sky-400 transition"
-                        >
-                          <LogIn className="w-3 h-3 text-sky-400" />
-                          <span>Sign In</span>
-                        </button>
-                      )
-                    )}
-                    <button
-                      onClick={() => {
-                        setEditDriverName(driver.name);
-                        setEditDriverMobile(driver.mobile);
-                        setEditVehicleNumber(driver.vehicleNumber);
-                        setEditVehicleModel(driver.vehicleModel || '');
-                        setEditDriverCode(driver.driverCode);
-                        setShowDriverEditModal(true);
-                      }}
-                      className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center space-x-0.5 font-bold transition"
-                    >
-                      <UserCog className="w-3 h-3" />
-                      <span>Edit</span>
-                    </button>
-                  </div>
-                  <h2 className="text-xl font-black text-white tracking-tight mt-0.5">
-                    {driver.name}
-                  </h2>
-                  <div className="flex items-center space-x-2 mt-1">
-                    <span className="bg-slate-900 text-sky-300 border border-slate-700 px-2 py-0.5 rounded text-xs font-mono font-bold tracking-wider">
-                      {driver.vehicleNumber}
-                    </span>
-                    <span className="text-xs text-slate-300 font-bold">
-                      {driver.driverCode}
-                    </span>
-                    {driver.vehicleModel && (
-                      <span className="text-xs text-slate-400 truncate max-w-[130px]">
-                        • {driver.vehicleModel}
+            {/* Top Real-time Broadcast Notification Toast Banner */}
+            {broadcastAlertNotice && (
+              <div className="bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-500 text-slate-950 p-3 rounded-2xl font-black text-xs flex items-center justify-between shadow-xl shadow-amber-500/20 border border-amber-300 animate-bounce">
+                <div className="flex items-center space-x-2">
+                  <Radio className="w-4 h-4 animate-ping text-slate-950 shrink-0" />
+                  <span className="truncate">{broadcastAlertNotice}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => soundEngine.playNewTripAlert()}
+                  className="px-2 py-0.5 bg-slate-950 text-amber-300 rounded-lg text-[10px] font-mono shrink-0 ml-2"
+                >
+                  🔔 Tone
+                </button>
+              </div>
+            )}
+
+            {/* 1. DRIVER PROFILE CARD WITH PHOTO & DEVICE ID */}
+            <div className="bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#1e293b] border border-slate-700/60 rounded-3xl p-4 shadow-lg space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex items-start space-x-3 min-w-0">
+                  {/* Photo Avatar */}
+                  {driver.photoUrl ? (
+                    <img
+                      src={driver.photoUrl}
+                      alt={driver.name}
+                      className="w-12 h-12 rounded-2xl object-cover border border-sky-400/40 shadow-sm shrink-0"
+                    />
+                  ) : (
+                    <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center font-black text-lg shrink-0">
+                      {driver.name.charAt(0)}
+                    </div>
+                  )}
+
+                  <div className="min-w-0">
+                    <div className="flex items-center space-x-2 flex-wrap gap-y-1">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                        Driver Profile
                       </span>
-                    )}
+                      <button
+                        onClick={() => {
+                          setEditDriverName(driver.name);
+                          setEditDriverMobile(driver.mobile);
+                          setEditVehicleNumber(driver.vehicleNumber);
+                          setEditVehicleModel(driver.vehicleModel || '');
+                          setEditDriverCode(driver.driverCode);
+                          setEditHomeLocation(driver.homeLocation || '');
+                          setEditPhotoUrl(driver.photoUrl || '');
+                          setShowDriverEditModal(true);
+                        }}
+                        className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center space-x-0.5 font-bold transition"
+                      >
+                        <UserCog className="w-3 h-3" />
+                        <span>Edit</span>
+                      </button>
+                    </div>
+
+                    <h2 className="text-lg font-black text-white tracking-tight mt-0.5 truncate">
+                      {driver.name}
+                    </h2>
+
+                    <div className="flex items-center space-x-2 mt-0.5 flex-wrap gap-y-1">
+                      <span className="bg-slate-900 text-sky-300 border border-slate-700 px-2 py-0.5 rounded text-[11px] font-mono font-bold tracking-wider">
+                        {driver.vehicleNumber}
+                      </span>
+                      <span className="text-xs text-slate-300 font-mono font-bold">
+                        {driver.driverCode}
+                      </span>
+                      {driver.vehicleModel && (
+                        <span className="text-xs text-slate-400 truncate max-w-[130px]">
+                          • {driver.vehicleModel}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Driver Home Location (e.g. Selvapuram, Gandhipuram, Sulur) */}
+                    <div className="flex items-center space-x-1.5 mt-1 text-[11px] text-emerald-400 font-bold">
+                      <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                      <span className="truncate">
+                        Home: {driver.homeLocation || 'Coimbatore'}
+                      </span>
+                    </div>
+
+                    {/* Hardware Device ID */}
+                    <div className="flex items-center space-x-1 mt-1 text-[10px] text-slate-400 font-mono">
+                      <Smartphone className="w-3 h-3 text-sky-400 shrink-0" />
+                      <span className="text-slate-400">Device:</span>
+                      <span className="text-slate-300 truncate max-w-[140px] font-bold">
+                        {driver.deviceId}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(driver.deviceId);
+                          setCopiedDeviceId(true);
+                          setTimeout(() => setCopiedDeviceId(false), 2000);
+                        }}
+                        className="text-sky-400 hover:text-white"
+                        title="Copy Device ID"
+                      >
+                        {copiedDeviceId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
 
-                {/* Status indicator */}
-                <div className="text-right flex flex-col items-end">
+                {/* Status indicator & Activation */}
+                <div className="text-right flex flex-col items-end shrink-0">
                   <div
                     className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-black border ${
                       driver.operationalStatus === 'READY'
@@ -645,12 +891,30 @@ export default function App() {
                         <span className="text-emerald-400 font-bold">Device Active</span>
                       </>
                     ) : (
-                      <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setOnboardTab('activate');
+                          setShowDriverOnboardModal(true);
+                        }}
+                        className="inline-flex items-center space-x-1 text-amber-400 hover:text-amber-300 font-bold"
+                      >
                         <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                        <span className="text-amber-400 font-bold">{driver.activationStatus}</span>
-                      </>
+                        <span>Activate</span>
+                      </button>
                     )}
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOnboardTab('signup');
+                      setShowDriverOnboardModal(true);
+                    }}
+                    className="mt-1.5 text-[10px] text-sky-400 hover:text-sky-300 underline font-bold"
+                  >
+                    Sign Up / Onboard
+                  </button>
                 </div>
               </div>
 
@@ -675,6 +939,139 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {/* LIVE TRIP BROADCAST ALERT CARD (Blinking, Pulsing Beacon, Audio Alert, Instant Claim) */}
+            {openTripsList.length > 0 && (
+              <div className="relative overflow-hidden rounded-3xl border-2 border-amber-400 bg-gradient-to-br from-amber-950/70 via-slate-900 to-amber-950/50 p-4 shadow-[0_0_35px_rgba(251,191,36,0.45)] animate-[pulse_1.8s_cubic-bezier(0.4,0,0.6,1)_infinite] space-y-3">
+                <div className="flex items-center justify-between pb-2 border-b border-amber-500/30">
+                  <div className="flex items-center space-x-2">
+                    <span className="relative flex h-3.5 w-3.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-amber-500"></span>
+                    </span>
+                    <span className="text-xs font-black uppercase tracking-wider text-amber-300 flex items-center space-x-1.5">
+                      <span>⚡ LIVE TRIP BROADCAST</span>
+                      <span className="px-2 py-0.5 rounded-full text-[10px] bg-amber-400 text-slate-950 font-black animate-bounce">
+                        {openTripsList.length} AVAILABLE
+                      </span>
+                    </span>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => soundEngine.playNewTripAlert()}
+                    className="px-2.5 py-1 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-[11px] font-bold border border-amber-500/40 flex items-center space-x-1 transition active:scale-95 shadow-sm"
+                    title="Play Alert Chime"
+                  >
+                    <Volume2 className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Play Tone</span>
+                  </button>
+                </div>
+
+                <div className="space-y-3">
+                  {openTripsList.map((trip) => (
+                    <div
+                      key={trip.id}
+                      className="bg-slate-950/90 border border-amber-500/40 rounded-2xl p-3.5 shadow-md space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-2">
+                          <span className="font-mono font-black text-amber-400 text-sm">
+                            {trip.tripNumber}
+                          </span>
+                          <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-md text-[11px] font-mono font-black">
+                            ₹{trip.estimatedFare}
+                          </span>
+                        </div>
+                        {trip.estimatedDistanceKm != null && (
+                          <span className="text-slate-400 text-[11px] font-mono font-semibold">
+                            ~{trip.estimatedDistanceKm} km
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="space-y-1.5 text-xs">
+                        <div className="flex items-start space-x-2">
+                          <div className="w-2 h-2 rounded-full bg-emerald-400 mt-1.5 shrink-0" />
+                          <div className="min-w-0">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold block">Pickup</span>
+                            <p className="text-white font-semibold truncate leading-tight">
+                              {trip.pickupAddress}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex items-start space-x-2">
+                          <div className="w-2 h-2 rounded-full bg-rose-400 mt-1.5 shrink-0" />
+                          <div className="min-w-0">
+                            <span className="text-[10px] text-slate-400 uppercase font-bold block">Drop</span>
+                            <p className="text-white font-semibold truncate leading-tight">
+                              {trip.dropAddress}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Claim OTP Input & Instant Action */}
+                      <div className="pt-2 border-t border-slate-800/80 flex items-center space-x-2">
+                        <div className="relative flex-1">
+                          <input
+                            type="text"
+                            maxLength={6}
+                            value={inlineTripClaimOtps[trip.id] || ''}
+                            onChange={(e) => {
+                              const val = e.target.value.replace(/\D/g, '');
+                              setInlineTripClaimOtps((prev) => ({ ...prev, [trip.id]: val }));
+                            }}
+                            placeholder="6-Digit OTP"
+                            className="w-full bg-slate-900 border border-slate-700 focus:border-amber-400 rounded-xl px-3 py-2 text-white font-mono font-bold tracking-widest text-xs focus:outline-none placeholder:text-slate-500 placeholder:tracking-normal"
+                          />
+                        </div>
+
+                        {trip.tripAccessOtp && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInlineTripClaimOtps((prev) => ({
+                                ...prev,
+                                [trip.id]: trip.tripAccessOtp || '',
+                              }));
+                            }}
+                            className="px-2 py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-xl text-[10px] font-bold border border-slate-700 shrink-0 transition"
+                            title="Auto-fill Dispatch OTP"
+                          >
+                            Fill OTP
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          disabled={
+                            inlineClaimingTripId === trip.id ||
+                            (inlineTripClaimOtps[trip.id] || '').length < 4
+                          }
+                          onClick={() => handleInlineClaimTrip(trip.id)}
+                          className={`px-3.5 py-2 rounded-xl text-xs font-black uppercase tracking-wider shrink-0 transition shadow-md ${
+                            (inlineTripClaimOtps[trip.id] || '').length >= 4 &&
+                            inlineClaimingTripId !== trip.id
+                              ? 'bg-gradient-to-r from-amber-500 to-emerald-500 hover:from-amber-400 hover:to-emerald-400 text-slate-950 active:scale-95 shadow-amber-500/20'
+                              : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                          }`}
+                        >
+                          {inlineClaimingTripId === trip.id ? 'Claiming...' : 'Claim Trip'}
+                        </button>
+                      </div>
+
+                      {inlineClaimError[trip.id] && (
+                        <p className="text-[11px] text-rose-400 font-semibold">
+                          {inlineClaimError[trip.id]}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* 2. TODAY'S SUMMARY (4 Metric Cards) */}
             <div className="bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#1e293b] border border-slate-700/60 rounded-2xl p-3.5 shadow-lg space-y-2">
@@ -740,14 +1137,26 @@ export default function App() {
 
             {/* Device Activation Warning if not ACTIVE */}
             {driver.activationStatus !== 'ACTIVE' && (
-              <div className="bg-rose-950/60 border border-rose-700/60 rounded-2xl p-3.5 flex items-center space-x-3 text-rose-200 text-xs">
-                <ShieldAlert className="w-5 h-5 text-rose-400 shrink-0" />
-                <div className="flex-1">
-                  <p className="font-bold text-white">Device Not Authorized ({driver.activationStatus})</p>
-                  <p className="text-[11px] text-rose-300/80">
-                    Contact dispatch or use the Dispatcher Console to authorize this device before claiming trips.
-                  </p>
+              <div className="bg-amber-950/60 border border-amber-700/60 rounded-2xl p-3.5 flex items-center justify-between text-amber-200 text-xs">
+                <div className="flex items-center space-x-3">
+                  <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
+                  <div>
+                    <p className="font-bold text-white">Device Not Activated ({driver.activationStatus})</p>
+                    <p className="text-[11px] text-amber-300/80">
+                      Share your Device ID with Dispatch to get your 6-digit Activation Code.
+                    </p>
+                  </div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOnboardTab('activate');
+                    setShowDriverOnboardModal(true);
+                  }}
+                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs shrink-0 ml-2"
+                >
+                  Activate
+                </button>
               </div>
             )}
 
@@ -763,22 +1172,12 @@ export default function App() {
 
               <div className="pt-2">
                 <button
-                  disabled={isConfigured && driverSession?.user && driver.activationStatus !== 'ACTIVE'}
                   onClick={() => {
-                    if (isConfigured && (!driverSession?.user || !driver.authUserId)) {
-                      setDriverAuthError('Please sign in with your authorized Driver account before getting trips.');
-                      setShowDriverLoginModal(true);
-                      return;
-                    }
                     setTripAccessOtp('');
                     setClaimError(null);
                     setLoadTripModal(true);
                   }}
-                  className={`w-full py-4 px-6 rounded-2xl font-black text-base tracking-wider shadow-lg active:scale-[0.98] transition flex items-center justify-center space-x-2 ${
-                    !isConfigured || (driverSession?.user && driver.activationStatus === 'ACTIVE')
-                      ? 'bg-gradient-to-r from-sky-600 via-blue-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-sky-600/30'
-                      : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-                  }`}
+                  className="w-full py-4 px-6 rounded-2xl font-black text-base tracking-wider shadow-lg active:scale-[0.98] transition flex items-center justify-center space-x-2 bg-gradient-to-r from-sky-600 via-blue-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-sky-600/30"
                 >
                   <Key className="w-5 h-5" />
                   <span>GET TRIP</span>
@@ -1254,14 +1653,14 @@ export default function App() {
         />
       )}
 
-      {/* DRIVER & VEHICLE PROFILE MODAL */}
+      {/* DRIVER & VEHICLE PROFILE MODAL (EDIT PHOTO & HOME LOCATION ANYTIME) */}
       {showDriverEditModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] border border-slate-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 text-slate-100">
+          <div className="bg-[#0f172a] border border-slate-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 text-slate-100 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
                 <UserCog className="w-4 h-4 text-sky-400" />
-                <h3 className="font-bold text-sm text-white">Edit Driver &amp; Vehicle</h3>
+                <h3 className="font-bold text-sm text-white">Edit Profile &amp; Location</h3>
               </div>
               <button
                 onClick={() => setShowDriverEditModal(false)}
@@ -1271,7 +1670,49 @@ export default function App() {
               </button>
             </div>
 
-            <form onSubmit={handleSaveDriverProfile} className="space-y-3 text-xs">
+            <form onSubmit={handleSaveDriverProfile} className="space-y-3.5 text-xs">
+              {/* Photo Upload from Gallery (Not Camera forced) */}
+              <div className="space-y-1.5 p-3 rounded-2xl bg-slate-900/80 border border-slate-800">
+                <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                  Driver Photo (Select from Phone Gallery)
+                </label>
+                <div className="flex items-center space-x-3">
+                  {editPhotoUrl ? (
+                    <img
+                      src={editPhotoUrl}
+                      alt="Driver Photo"
+                      className="w-14 h-14 rounded-2xl object-cover border border-sky-400/50 shadow"
+                    />
+                  ) : (
+                    <div className="w-14 h-14 rounded-2xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400">
+                      <Camera className="w-6 h-6" />
+                    </div>
+                  )}
+
+                  <div className="flex-1 space-y-1">
+                    <label className="px-3 py-1.5 bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/40 rounded-xl font-bold text-xs flex items-center justify-center space-x-1.5 cursor-pointer transition">
+                      <Upload className="w-3.5 h-3.5" />
+                      <span>Choose from Gallery</span>
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleEditPhotoGallerySelect}
+                        className="hidden"
+                      />
+                    </label>
+                    {editPhotoUrl && (
+                      <button
+                        type="button"
+                        onClick={() => setEditPhotoUrl('')}
+                        className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold underline block text-center w-full"
+                      >
+                        Remove Photo
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+
               <div className="space-y-1">
                 <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
                   Driver Full Name
@@ -1298,6 +1739,27 @@ export default function App() {
                 />
               </div>
 
+              {/* Home Location input - editable anytime */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider block">
+                    Driver Home Location
+                  </label>
+                  <span className="text-[10px] text-slate-400">e.g. Selvapuram, Gandhipuram, Sulur</span>
+                </div>
+                <div className="relative">
+                  <MapPin className="w-4 h-4 text-emerald-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    required
+                    value={editHomeLocation}
+                    onChange={(e) => setEditHomeLocation(e.target.value)}
+                    placeholder="e.g. Selvapuram, Gandhipuram, Sulur"
+                    className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl pl-9 pr-3 py-2 text-white font-medium focus:outline-none focus:border-emerald-400"
+                  />
+                </div>
+              </div>
+
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
@@ -1322,7 +1784,7 @@ export default function App() {
                     required
                     value={editDriverCode}
                     onChange={(e) => setEditDriverCode(e.target.value.toUpperCase())}
-                    placeholder="DRV-101"
+                    placeholder="DRV0051"
                     className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-sky-500"
                   />
                 </div>
@@ -1336,7 +1798,7 @@ export default function App() {
                   type="text"
                   value={editVehicleModel}
                   onChange={(e) => setEditVehicleModel(e.target.value)}
-                  placeholder="e.g. Toyota Innova Crysta"
+                  placeholder="e.g. Maruti Tour S, Toyota Innova"
                   className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500"
                 />
               </div>
@@ -1346,7 +1808,7 @@ export default function App() {
                   type="submit"
                   className="w-full py-2.5 rounded-xl bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs shadow-md transition active:scale-[0.98]"
                 >
-                  Save Profile &amp; Vehicle
+                  Save Profile &amp; Location
                 </button>
               </div>
             </form>
@@ -1354,24 +1816,27 @@ export default function App() {
         </div>
       )}
 
-      {/* DRIVER AUTHENTICATION MODAL */}
-      {showDriverLoginModal && (
+      {/* PHASE 2.4: NO-PASSWORD DRIVER ONBOARDING & DEVICE ID ACTIVATION MODAL */}
+      {showDriverOnboardModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-[#0f172a] border border-slate-800 w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 text-slate-100">
+          <div className="bg-[#0f172a] border border-slate-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 text-slate-100 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
                 <div className="w-8 h-8 rounded-xl bg-sky-500/10 text-sky-400 flex items-center justify-center">
-                  <Lock className="w-4 h-4" />
+                  <Smartphone className="w-4 h-4" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-base text-white">Driver Sign-In</h3>
-                  <p className="text-[11px] text-slate-400">Sign in to your SBS Travels Driver Account</p>
+                  <h3 className="font-bold text-base text-white">Driver Onboarding</h3>
+                  <p className="text-[10px] text-sky-400 font-bold uppercase">Device ID Hardware Auth</p>
                 </div>
               </div>
               <button
                 onClick={() => {
-                  setShowDriverLoginModal(false);
-                  setDriverAuthError(null);
+                  setShowDriverOnboardModal(false);
+                  setSignupError(null);
+                  setSignupSuccess(null);
+                  setActivationError(null);
+                  setActivationSuccess(null);
                 }}
                 className="w-7 h-7 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs font-bold"
               >
@@ -1379,67 +1844,319 @@ export default function App() {
               </button>
             </div>
 
-            <form onSubmit={handleDriverLogin} className="space-y-3.5 text-xs">
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Driver Email / Login
-                </label>
-                <input
-                  type="email"
-                  required
-                  autoFocus
-                  value={driverLoginEmail}
-                  onChange={(e) => setDriverLoginEmail(e.target.value)}
-                  placeholder="driver@sbstravels.com"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-sky-500"
-                />
-              </div>
+            {/* Modal Tabs */}
+            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setOnboardTab('signup')}
+                className={`py-2 rounded-xl font-bold transition flex items-center justify-center space-x-1.5 ${
+                  onboardTab === 'signup'
+                    ? 'bg-sky-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <PlusCircle className="w-3.5 h-3.5" />
+                <span>1. Sign Up</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setOnboardTab('activate')}
+                className={`py-2 rounded-xl font-bold transition flex items-center justify-center space-x-1.5 ${
+                  onboardTab === 'activate'
+                    ? 'bg-sky-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Key className="w-3.5 h-3.5" />
+                <span>2. Activation Code</span>
+              </button>
+            </div>
 
-              <div className="space-y-1">
-                <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Password
-                </label>
-                <input
-                  type="password"
-                  required
-                  value={driverLoginPassword}
-                  onChange={(e) => setDriverLoginPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2.5 text-white placeholder-slate-500 focus:outline-none focus:border-sky-500 font-mono"
-                />
-              </div>
+            {/* TAB 1: DRIVER SIGN-UP */}
+            {onboardTab === 'signup' && (
+              <form onSubmit={handleOnboardingSubmit} className="space-y-3 text-xs">
+                {/* Photo Upload from Gallery (Not Camera forced) */}
+                <div className="space-y-1.5 p-3 rounded-2xl bg-slate-900/80 border border-slate-800">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                      Driver Photo (Upload from Gallery)
+                    </label>
+                    <span className="text-[9px] text-sky-400 font-bold">Gallery file</span>
+                  </div>
+                  <div className="flex items-center space-x-3">
+                    {signupPhotoUrl ? (
+                      <img
+                        src={signupPhotoUrl}
+                        alt="Preview"
+                        className="w-14 h-14 rounded-2xl object-cover border border-sky-400/50 shadow"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-2xl bg-slate-950 border border-slate-700 flex items-center justify-center text-slate-400">
+                        <Camera className="w-6 h-6 text-slate-500" />
+                      </div>
+                    )}
 
-              {driverAuthError && (
-                <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-700/60 text-rose-300 text-xs flex items-start space-x-2">
-                  <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
-                  <p className="leading-snug text-[11px]">{driverAuthError}</p>
+                    <div className="flex-1 space-y-1">
+                      <label className="px-3 py-1.5 bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/40 rounded-xl font-bold text-xs flex items-center justify-center space-x-1.5 cursor-pointer transition">
+                        <Upload className="w-3.5 h-3.5" />
+                        <span>Select Photo from Gallery</span>
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={handlePhotoGallerySelect}
+                          className="hidden"
+                        />
+                      </label>
+                      {signupPhotoUrl && (
+                        <button
+                          type="button"
+                          onClick={() => setSignupPhotoUrl('')}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 font-semibold underline block text-center w-full"
+                        >
+                          Remove Photo
+                        </button>
+                      )}
+                    </div>
+                  </div>
                 </div>
-              )}
 
-              <div className="pt-2">
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Driver Full Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={signupName}
+                    onChange={(e) => setSignupName(e.target.value)}
+                    placeholder="e.g. S. Ramesh"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-medium focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Mobile Number
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={signupMobile}
+                    onChange={(e) => setSignupMobile(e.target.value)}
+                    placeholder="9876543210"
+                    className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono focus:outline-none focus:border-sky-500"
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Vehicle Reg No.
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={signupVehNo}
+                      onChange={(e) => setSignupVehNo(e.target.value.toUpperCase())}
+                      placeholder="TN 38 AA 1234"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono font-bold focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                      Vehicle Model
+                    </label>
+                    <input
+                      type="text"
+                      value={signupVehModel}
+                      onChange={(e) => setSignupVehModel(e.target.value)}
+                      placeholder="Maruti Tour S"
+                      className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-sky-500"
+                    />
+                  </div>
+                </div>
+
+                {/* Home Location */}
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-emerald-400 uppercase tracking-wider block">
+                      Driver Home Location
+                    </label>
+                    <span className="text-[10px] text-slate-400">Can edit anytime</span>
+                  </div>
+                  <div className="relative">
+                    <MapPin className="w-4 h-4 text-emerald-400 absolute left-3 top-2.5" />
+                    <input
+                      type="text"
+                      required
+                      value={signupHomeLocation}
+                      onChange={(e) => setSignupHomeLocation(e.target.value)}
+                      placeholder="e.g. Selvapuram, Gandhipuram, Sulur"
+                      className="w-full bg-slate-950 border border-emerald-500/40 rounded-xl pl-9 pr-3 py-2 text-white font-medium focus:outline-none focus:border-emerald-400"
+                    />
+                  </div>
+                </div>
+
+                {/* Driver ID auto-generation note */}
+                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-[10px] text-slate-400 space-y-1">
+                  <p className="font-bold text-slate-300">
+                    Driver ID is automated starting from <span className="text-sky-400 font-mono">DRV0051</span>.
+                  </p>
+                  <p className="text-[9px] text-slate-400">
+                    IDs 0001 - 0050 are reserved for admin/dispatch. Master Admin can modify this to DRV007 or any ID anytime in the Dispatcher Console.
+                  </p>
+                </div>
+
+                {/* Persistent Device ID Box */}
+                <div className="p-3 rounded-2xl bg-sky-950/40 border border-sky-500/30 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-sky-400 uppercase">
+                      Hardware Device ID
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        navigator.clipboard.writeText(driver.deviceId);
+                        setCopiedDeviceId(true);
+                        setTimeout(() => setCopiedDeviceId(false), 2000);
+                      }}
+                      className="text-[10px] text-sky-300 hover:text-white font-bold flex items-center space-x-1"
+                    >
+                      {copiedDeviceId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                      <span>{copiedDeviceId ? 'Copied' : 'Copy'}</span>
+                    </button>
+                  </div>
+                  <p className="font-mono text-[11px] font-bold text-white bg-slate-950 p-2 rounded-xl border border-slate-800 break-all select-all">
+                    {driver.deviceId}
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const msg = `SBS Travels Driver: Hello Admin, I am registering as a driver.\nName: ${signupName || driver.name}\nMobile: ${signupMobile || driver.mobile}\nVehicle: ${signupVehNo || driver.vehicleNumber}\nHome: ${signupHomeLocation}\nDevice ID: *${driver.deviceId}*\nPlease generate my 6-digit Activation Code in Dispatch Console.`;
+                      window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
+                    }}
+                    className="w-full py-1.5 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 rounded-xl font-bold text-[11px] flex items-center justify-center space-x-1.5 transition"
+                  >
+                    <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Send Device ID to Admin via WhatsApp</span>
+                  </button>
+                </div>
+
+                {signupError && (
+                  <p className="text-[11px] text-rose-400 font-semibold p-2 rounded-xl bg-rose-950/40 border border-rose-800/40">
+                    {signupError}
+                  </p>
+                )}
+
+                {signupSuccess && (
+                  <p className="text-[11px] text-emerald-400 font-semibold p-2 rounded-xl bg-emerald-950/40 border border-emerald-800/40">
+                    {signupSuccess}
+                  </p>
+                )}
+
                 <button
                   type="submit"
-                  disabled={isDriverLoggingIn}
-                  className="w-full py-3 rounded-xl bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-bold text-xs shadow-md transition active:scale-[0.98] flex items-center justify-center space-x-1.5"
+                  disabled={isSubmittingSignup}
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-black text-xs uppercase tracking-wider shadow-lg active:scale-[0.98] transition flex items-center justify-center space-x-1.5"
                 >
-                  {isDriverLoggingIn ? (
+                  {isSubmittingSignup ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Verifying Credentials...</span>
+                      <span>Submitting Registration...</span>
+                    </>
+                  ) : (
+                    <span>Register Driver &amp; Submit to Dispatch</span>
+                  )}
+                </button>
+
+                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-[10px] text-slate-400 text-center font-medium">
+                  🔒 No passwords required. Login is securely bound to this Device ID in Supabase.
+                </div>
+              </form>
+            )}
+
+            {/* TAB 2: DEVICE ACTIVATION CODE */}
+            {onboardTab === 'activate' && (
+              <form onSubmit={handleActivateDeviceSubmit} className="space-y-4 text-xs">
+                <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold text-slate-400 uppercase">
+                      Current Device ID
+                    </span>
+                    <span className={`px-2 py-0.5 rounded font-black text-[10px] uppercase ${
+                      driver.activationStatus === 'ACTIVE'
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    }`}>
+                      {driver.activationStatus}
+                    </span>
+                  </div>
+                  <p className="font-mono text-[11px] font-bold text-white bg-slate-950 p-2 rounded-xl border border-slate-800 break-all select-all">
+                    {driver.deviceId}
+                  </p>
+                </div>
+
+                <div className="space-y-1.5 text-center">
+                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                    Enter 6-Digit Activation Code
+                  </label>
+                  <p className="text-[10px] text-slate-400">
+                    Generated by Admin in Dispatch Console specifically for this Device ID.
+                  </p>
+                  <input
+                    type="text"
+                    maxLength={6}
+                    autoFocus
+                    value={inputActivationCode}
+                    onChange={(e) => setInputActivationCode(e.target.value.replace(/\D/g, ''))}
+                    placeholder="• • • • • •"
+                    className="w-full text-center tracking-[0.4em] font-mono text-2xl font-black py-3 bg-slate-950 border border-sky-500/40 focus:border-sky-400 rounded-2xl text-white focus:outline-none transition shadow-inner"
+                  />
+                </div>
+
+                {activationError && (
+                  <div className="p-2.5 rounded-xl bg-rose-950/60 border border-rose-700/60 text-rose-300 text-xs text-center flex items-center justify-center space-x-1.5 font-medium">
+                    <ShieldAlert className="w-3.5 h-3.5 text-rose-400 shrink-0" />
+                    <span>{activationError}</span>
+                  </div>
+                )}
+
+                {activationSuccess && (
+                  <div className="p-2.5 rounded-xl bg-emerald-950/60 border border-emerald-700/60 text-emerald-300 text-xs text-center flex items-center justify-center space-x-1.5 font-medium">
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                    <span>{activationSuccess}</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={inputActivationCode.length < 4 || isActivatingDevice}
+                  className={`w-full py-3.5 rounded-2xl font-black text-xs uppercase tracking-wider transition shadow-lg flex items-center justify-center space-x-2 ${
+                    inputActivationCode.length >= 4 && !isActivatingDevice
+                      ? 'bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-sky-600/20 active:scale-[0.98]'
+                      : 'bg-slate-800 text-slate-500 cursor-not-allowed'
+                  }`}
+                >
+                  {isActivatingDevice ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      <span>Verifying Device Binding...</span>
                     </>
                   ) : (
                     <>
-                      <LogIn className="w-3.5 h-3.5" />
-                      <span>Authenticate Driver Session</span>
+                      <ShieldCheck className="w-4 h-4" />
+                      <span>Authorize &amp; Activate Device</span>
                     </>
                   )}
                 </button>
-              </div>
 
-              <div className="p-2.5 rounded-xl bg-slate-950 border border-slate-800 text-[10px] text-slate-400 text-center leading-relaxed font-medium">
-                Your driver account is securely connected to your assigned driver profile.
-              </div>
-            </form>
+                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-[10px] text-slate-400 text-center leading-relaxed">
+                  🛡️ The activation code is cryptographically bound in Supabase to this phone. If entered on a different mobile, it will be rejected as invalid.
+                </div>
+              </form>
+            )}
           </div>
         </div>
       )}
@@ -1501,15 +2218,19 @@ export default function App() {
                   <span className="font-mono text-sky-400 font-bold">{driver.driverCode}</span>
                 </div>
                 <p className="text-[11px] text-slate-300 font-medium">{driver.name} • {driver.vehicleNumber}</p>
-                <p className="text-[10px] text-slate-500">
-                  {driverSession?.user ? `Signed in as ${driverSession.user.email}` : 'Local driver profile'}
+                <div className="flex items-center space-x-1 text-[10px] text-emerald-400 font-bold">
+                  <MapPin className="w-3 h-3 text-emerald-400" />
+                  <span>Home: {driver.homeLocation || 'Coimbatore'}</span>
+                </div>
+                <p className="text-[10px] text-slate-500 font-mono truncate">
+                  Device: {driver.deviceId}
                 </p>
               </div>
 
               {/* Version & About */}
               <div className="p-3 bg-slate-950 border border-slate-800 rounded-2xl text-center space-y-1">
                 <p className="font-bold text-slate-200 text-xs">SBS Travels Driver Application</p>
-                <p className="text-[11px] text-slate-400 font-medium">Version 2.3.4 (Production Build)</p>
+                <p className="text-[11px] text-slate-400 font-medium">Version 2.4.0 (Hardware Device ID Auth)</p>
                 <div className="pt-1 flex flex-col items-center">
                   <span className="text-[10px] text-slate-400 font-bold uppercase">Powered by</span>
                   <div className="inline-flex items-center space-x-1 px-2 py-0.5 bg-slate-900 border border-red-600/80 rounded mt-0.5">
@@ -1519,17 +2240,19 @@ export default function App() {
                 </div>
               </div>
 
-              {/* Sign out button */}
-              {driverSession?.user && (
-                <button
-                  type="button"
-                  onClick={() => { handleDriverSignOut(); setShowSettingsModal(false); }}
-                  className="w-full py-2.5 bg-rose-950/40 hover:bg-rose-900/40 text-rose-300 font-bold rounded-xl border border-rose-800/50 transition text-xs flex items-center justify-center space-x-1.5"
-                >
-                  <LogOut className="w-4 h-4" />
-                  <span>Log Out Driver Session</span>
-                </button>
-              )}
+              {/* Switch / Reset Driver Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowSettingsModal(false);
+                  setOnboardTab('signup');
+                  setShowDriverOnboardModal(true);
+                }}
+                className="w-full py-2.5 bg-sky-950/40 hover:bg-sky-900/40 text-sky-300 font-bold rounded-xl border border-sky-800/50 transition text-xs flex items-center justify-center space-x-1.5"
+              >
+                <Smartphone className="w-4 h-4 text-sky-400" />
+                <span>Onboard / Re-register Device</span>
+              </button>
             </div>
           </div>
         </div>

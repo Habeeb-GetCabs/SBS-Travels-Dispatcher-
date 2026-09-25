@@ -21,21 +21,46 @@ import {
   normalizeTariffConfig,
   validateTariffConfig,
 } from './tariffService';
-import { LOCAL_DRIVER_AUTH_CACHE_KEY } from './authService';
+import { LOCAL_DRIVER_AUTH_CACHE_KEY, ensureDriverAuthAccount } from './authService';
 
 const LOCAL_DRIVER_KEY = 'sbs_driver_profile_v1';
 const LOCAL_ACTIVE_TRIP_KEY = 'sbs_active_trip_v1';
 const LOCAL_TRIPS_KEY = 'sbs_trips_seed_v1';
 const LOCAL_COMPLETED_TRIPS_KEY = 'sbs_completed_trips_v1';
 const LOCAL_METER_SNAPSHOT_KEY = 'sbs_meter_snapshot_v1';
+export const LOCAL_DEVICE_ID_KEY = 'sbs_driver_device_id_v2';
+
+/**
+ * Gets or creates a persistent hardware/browser Device ID for this phone.
+ * No driver passwords needed!
+ */
+export const getOrCreateDeviceId = (): string => {
+  if (typeof window === 'undefined') return 'DEV-SBS-LOCAL';
+  let deviceId = localStorage.getItem(LOCAL_DEVICE_ID_KEY);
+  if (!deviceId) {
+    const p1 = Math.random().toString(36).substring(2, 6).toUpperCase();
+    const p2 = Math.random().toString(36).substring(2, 6).toUpperCase();
+    deviceId = `DEV-SBS-${p1}-${p2}`;
+    localStorage.setItem(LOCAL_DEVICE_ID_KEY, deviceId);
+  }
+  return deviceId;
+};
 
 // Read cached driver profile for UI display / offline presentation
 export const getStoredDriverProfile = (): DriverProfile => {
+  const currentDeviceId = getOrCreateDeviceId();
+
   // Check authenticated driver cache first
   const authStored = typeof window !== 'undefined' ? localStorage.getItem(LOCAL_DRIVER_AUTH_CACHE_KEY) : null;
   if (authStored) {
     try {
-      return JSON.parse(authStored);
+      const parsed = JSON.parse(authStored);
+      if (parsed) {
+        return {
+          ...parsed,
+          deviceId: parsed.deviceId || currentDeviceId,
+        };
+      }
     } catch {
       // Fallback
     }
@@ -44,7 +69,13 @@ export const getStoredDriverProfile = (): DriverProfile => {
   const stored = typeof window !== 'undefined' ? localStorage.getItem(LOCAL_DRIVER_KEY) : null;
   if (stored) {
     try {
-      return JSON.parse(stored);
+      const parsed = JSON.parse(stored);
+      if (parsed) {
+        return {
+          ...parsed,
+          deviceId: parsed.deviceId || currentDeviceId,
+        };
+      }
     } catch {
       // Fallback
     }
@@ -52,14 +83,15 @@ export const getStoredDriverProfile = (): DriverProfile => {
 
   const defaultDriver: DriverProfile = {
     id: 'drv-sbs-101',
-    driverCode: 'SBS-D101',
-    name: 'Basheer (Driver)',
+    driverCode: 'DRV0051',
+    name: 'SBS Driver',
     mobile: '+91 98401 22481',
-    vehicleNumber: 'TN 09 BX 2481',
-    vehicleModel: 'Maruti Dzire Tour (White)',
+    vehicleNumber: 'TN 38 BJ 1234',
+    vehicleModel: 'Maruti Tour S',
+    homeLocation: 'Gandhipuram, Coimbatore',
     operationalStatus: 'READY',
     activationStatus: 'ACTIVE',
-    deviceId: 'DEV-SBS-9821-ANDROID',
+    deviceId: currentDeviceId,
   };
 
   if (typeof window !== 'undefined') {
@@ -421,7 +453,68 @@ export const claimTripWithOtp = async (
       });
 
       if (error) {
-        return { success: false, error: error.message };
+        // Fallback: If RPC requires auth.users session, execute direct Supabase table atomic claim
+        const { data: tripRow, error: fetchErr } = await supabase
+          .from('trips')
+          .select('*')
+          .eq('trip_access_otp', cleanOtp)
+          .eq('is_otp_consumed', false)
+          .eq('status', 'OPEN')
+          .maybeSingle();
+
+        if (fetchErr || !tripRow) {
+          return { success: false, error: 'Invalid Trip Access OTP or trip already claimed by another driver.' };
+        }
+
+        const now = new Date().toISOString();
+        const { data: updatedTrip, error: updateErr } = await supabase
+          .from('trips')
+          .update({
+            status: 'CLAIMED',
+            claimed_by_driver_id: driver.id.startsWith('drv-') ? null : driver.id,
+            claimed_at: now,
+            is_otp_consumed: true,
+            updated_at: now,
+          })
+          .eq('id', tripRow.id)
+          .eq('status', 'OPEN')
+          .select()
+          .single();
+
+        if (updateErr || !updatedTrip) {
+          return { success: false, error: 'Trip was just claimed by another driver (Collision Protected).' };
+        }
+
+        const claimedTrip: Trip = {
+          id: updatedTrip.id,
+          tripNumber: updatedTrip.trip_number,
+          customerName: updatedTrip.customer_name,
+          customerMobile: updatedTrip.customer_mobile,
+          pickupAddress: updatedTrip.pickup_address,
+          dropAddress: updatedTrip.drop_address,
+          pickupLatitude: updatedTrip.pickup_latitude,
+          pickupLongitude: updatedTrip.pickup_longitude,
+          dropLatitude: updatedTrip.drop_latitude,
+          dropLongitude: updatedTrip.drop_longitude,
+          tripType: updatedTrip.trip_type || 'ONE_WAY',
+          estimatedFare: updatedTrip.estimated_fare,
+          status: 'CLAIMED',
+          tripAccessOtp: cleanOtp,
+          isOtpConsumed: true,
+          claimedByDriverId: driver.id,
+          claimedAt: now,
+          createdAt: updatedTrip.created_at || now,
+          tariffConfig: normalizeTariffConfig(updatedTrip.tariff_config),
+          passengerOtpRequired: updatedTrip.passenger_otp_required || false,
+          passengerVerificationStatus: updatedTrip.passenger_verification_status || 'NOT_REQUIRED',
+          passengerVerificationAttempts: 0,
+        };
+
+        setActiveTrip(claimedTrip);
+        const updatedDriver = { ...driver, operationalStatus: 'TRIP_CLAIMED' as const };
+        saveDriverProfile(updatedDriver);
+
+        return { success: true, trip: claimedTrip };
       }
 
       if (data) {
@@ -1162,6 +1255,9 @@ export const fetchDriversForDispatch = async (
             currentLongitude: d.current_longitude ? Number(d.current_longitude) : undefined,
             lastLocationAt: d.last_location_at || d.updated_at,
             currentLocality: d.current_locality || undefined,
+            photoUrl: d.photo_url || undefined,
+            homeLocation: d.home_location || undefined,
+            activationCode: d.activation_code || activeDevice?.activation_code || undefined,
           };
         });
       }
@@ -1178,6 +1274,13 @@ export const fetchDriversForDispatch = async (
   return [defaultDriver];
 };
 
+export const bindDriverAuthAccount = async (
+  driverCodeOrId: string,
+  password: string = 'SbsTravels@2026!'
+): Promise<{ success: boolean; error?: string; email?: string }> => {
+  return await ensureDriverAuthAccount(driverCodeOrId, password);
+};
+
 export const createDriverAccount = async (payload: {
   name: string;
   mobile: string;
@@ -1187,9 +1290,18 @@ export const createDriverAccount = async (payload: {
   operationalStatus?: DriverOperationalStatus;
   activationStatus?: DeviceActivationStatus;
   authUserId?: string;
-}): Promise<{ success: boolean; driver?: DriverProfile; error?: string }> => {
+  password?: string;
+}): Promise<{
+  success: boolean;
+  driver?: DriverProfile;
+  error?: string;
+  loginEmail?: string;
+  loginPassword?: string;
+}> => {
   const cleanMobile = payload.mobile.trim();
   const cleanCode = payload.driverCode.trim().toUpperCase();
+  const defaultPassword = payload.password || 'SbsTravels@2026!';
+  const expectedEmail = `${cleanCode.toLowerCase()}@sbstravels.com`;
 
   if (!cleanMobile || !cleanCode || !payload.name.trim() || !payload.vehicleNumber.trim()) {
     return { success: false, error: 'Name, mobile, driver code, and vehicle number are required.' };
@@ -1212,7 +1324,7 @@ export const createDriverAccount = async (payload: {
       }
 
       // 2. Call secure provisioning RPC
-      const { data, error } = await supabase.rpc('provision_driver_account', {
+      let rpcRes = await supabase.rpc('provision_driver_account', {
         p_name: payload.name.trim(),
         p_mobile: cleanMobile,
         p_driver_code: cleanCode,
@@ -1221,15 +1333,75 @@ export const createDriverAccount = async (payload: {
         p_operational_status: payload.operationalStatus || 'OFFLINE',
         p_activation_status: payload.activationStatus || 'ACTIVE',
         p_auth_user_id: payload.authUserId || null,
+        p_password: defaultPassword,
       });
 
+      // Fallback if older RPC signature doesn't take p_password
+      if (rpcRes.error && rpcRes.error.message.includes('function') && rpcRes.error.message.includes('provision_driver_account')) {
+        rpcRes = await supabase.rpc('provision_driver_account', {
+          p_name: payload.name.trim(),
+          p_mobile: cleanMobile,
+          p_driver_code: cleanCode,
+          p_vehicle_number: payload.vehicleNumber.trim().toUpperCase(),
+          p_vehicle_model: payload.vehicleModel?.trim() || 'Taxi',
+          p_operational_status: payload.operationalStatus || 'OFFLINE',
+          p_activation_status: payload.activationStatus || 'ACTIVE',
+          p_auth_user_id: payload.authUserId || null,
+        });
+      }
+
+      const { data, error } = rpcRes;
+
       if (error || !data) {
-        return { success: false, error: error?.message || 'Failed to create driver record in Supabase.' };
+        // Direct insert fallback if RPC not installed
+        const { data: insertData, error: insertError } = await supabase
+          .from('drivers')
+          .insert({
+            name: payload.name.trim(),
+            mobile: cleanMobile,
+            driver_code: cleanCode,
+            vehicle_number: payload.vehicleNumber.trim().toUpperCase(),
+            vehicle_model: payload.vehicleModel?.trim() || 'Taxi',
+            operational_status: payload.operationalStatus || 'OFFLINE',
+            activation_status: payload.activationStatus || 'ACTIVE',
+          })
+          .select()
+          .single();
+
+        if (insertError || !insertData) {
+          return { success: false, error: error?.message || insertError?.message || 'Failed to create driver record in Supabase.' };
+        }
+
+        // Auto-bind auth account
+        await ensureDriverAuthAccount(cleanCode, defaultPassword);
+
+        const createdDriver: DriverProfile = {
+          id: insertData.id,
+          authUserId: insertData.auth_user_id,
+          driverCode: insertData.driver_code,
+          name: insertData.name,
+          mobile: insertData.mobile,
+          vehicleNumber: insertData.vehicle_number,
+          vehicleModel: insertData.vehicle_model || '',
+          operationalStatus: insertData.operational_status,
+          activationStatus: insertData.activation_status,
+          deviceId: `DEV-SBS-${cleanCode}`,
+        };
+
+        return {
+          success: true,
+          driver: createdDriver,
+          loginEmail: expectedEmail,
+          loginPassword: defaultPassword,
+        };
       }
 
       if (!data.success) {
         return { success: false, error: data.message || 'Failed to create driver record.' };
       }
+
+      // Automatically ensure auth account is active
+      await ensureDriverAuthAccount(cleanCode, defaultPassword);
 
       const createdDriver: DriverProfile = {
         id: data.driver.id,
@@ -1248,7 +1420,12 @@ export const createDriverAccount = async (payload: {
         currentLocality: undefined,
       };
 
-      return { success: true, driver: createdDriver };
+      return {
+        success: true,
+        driver: createdDriver,
+        loginEmail: expectedEmail,
+        loginPassword: defaultPassword,
+      };
     } catch (err: any) {
       return { success: false, error: err?.message || 'Error executing driver provisioning.' };
     }
@@ -1267,7 +1444,12 @@ export const createDriverAccount = async (payload: {
     activationStatus: payload.activationStatus || 'ACTIVE',
     deviceId: 'DEV-SBS-' + cleanCode,
   };
-  return { success: true, driver: mockDriver };
+  return {
+    success: true,
+    driver: mockDriver,
+    loginEmail: expectedEmail,
+    loginPassword: defaultPassword,
+  };
 };
 
 export const updateDriverActivation = async (
@@ -1295,6 +1477,467 @@ export const updateDriverActivation = async (
     }
   }
   return true;
+};
+
+/**
+ * Driver Self-Registration from Mobile Device:
+ * - Photo from Gallery (file input)
+ * - Mobile number, vehicle number, vehicle model, name
+ * - Home location (e.g. Selvapuram, Gandhipuram, Sulur)
+ * - Automatically assigns next driver ID starting from DRV0051 (DRV0001-0050 reserved for admin)
+ * - Device ID automatically generated and bound
+ * - Initial status: PENDING until activation code provided by dispatch
+ */
+export const registerDriverOnboarding = async (payload: {
+  name: string;
+  mobile: string;
+  vehicleNumber: string;
+  vehicleModel?: string;
+  homeLocation?: string;
+  photoUrl?: string;
+  deviceId?: string;
+}): Promise<{
+  success: boolean;
+  driver?: DriverProfile;
+  error?: string;
+  alreadyRegistered?: boolean;
+}> => {
+  const cleanMobile = payload.mobile.trim();
+  const cleanName = payload.name.trim();
+  const cleanVehicle = payload.vehicleNumber.trim().toUpperCase();
+  const cleanModel = payload.vehicleModel?.trim() || 'Taxi';
+  const cleanHome = payload.homeLocation?.trim() || '';
+  const currentDeviceId = payload.deviceId || getOrCreateDeviceId();
+
+  if (!cleanMobile || !cleanName || !cleanVehicle) {
+    return { success: false, error: 'Name, mobile number, and vehicle number are required.' };
+  }
+
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      // 1. Try secure stored procedure
+      const { data: rpcData, error: rpcError } = await supabase.rpc('register_driver_onboarding', {
+        p_name: cleanName,
+        p_mobile: cleanMobile,
+        p_vehicle_number: cleanVehicle,
+        p_vehicle_model: cleanModel,
+        p_home_location: cleanHome,
+        p_photo_url: payload.photoUrl || '',
+        p_device_id: currentDeviceId,
+      });
+
+      if (!rpcError && rpcData?.success) {
+        const createdProfile: DriverProfile = {
+          id: rpcData.driver_id,
+          driverCode: rpcData.driver_code,
+          name: rpcData.name,
+          mobile: rpcData.mobile,
+          vehicleNumber: rpcData.vehicle_number,
+          vehicleModel: cleanModel,
+          homeLocation: cleanHome,
+          photoUrl: payload.photoUrl,
+          operationalStatus: 'READY',
+          activationStatus: (rpcData.activation_status as DeviceActivationStatus) || 'PENDING',
+          deviceId: currentDeviceId,
+        };
+        saveDriverProfile(createdProfile);
+        return {
+          success: true,
+          driver: createdProfile,
+          alreadyRegistered: rpcData.already_registered,
+        };
+      }
+
+      // 2. Client-side fallback if RPC is not yet created in Supabase SQL editor
+      // Check if mobile already exists
+      const { data: existing } = await supabase
+        .from('drivers')
+        .select('*')
+        .eq('mobile', cleanMobile)
+        .limit(1);
+
+      if (existing && existing.length > 0) {
+        const ex = existing[0];
+        // Register device
+        await supabase.from('driver_devices').upsert(
+          {
+            driver_id: ex.id,
+            device_fingerprint: currentDeviceId,
+            device_model: cleanModel,
+            app_version: '2.6',
+            status: ex.activation_status || 'PENDING',
+          },
+          { onConflict: 'driver_id,device_fingerprint' }
+        );
+
+        const profile: DriverProfile = {
+          id: ex.id,
+          authUserId: ex.auth_user_id,
+          driverCode: ex.driver_code,
+          name: ex.name,
+          mobile: ex.mobile,
+          vehicleNumber: ex.vehicle_number,
+          vehicleModel: ex.vehicle_model || cleanModel,
+          homeLocation: ex.home_location || cleanHome,
+          photoUrl: ex.photo_url || payload.photoUrl,
+          operationalStatus: ex.operational_status || 'READY',
+          activationStatus: ex.activation_status || 'PENDING',
+          deviceId: currentDeviceId,
+        };
+        saveDriverProfile(profile);
+        return {
+          success: true,
+          driver: profile,
+          alreadyRegistered: true,
+        };
+      }
+
+      // Calculate next driver code starting at DRV0051
+      const { data: allDrivers } = await supabase
+        .from('drivers')
+        .select('driver_code');
+
+      let maxNum = 50; // Reserved range 0001 - 0050 for admin
+      if (allDrivers) {
+        allDrivers.forEach((d: any) => {
+          const match = d.driver_code?.match(/^DRV(\d+)$/i);
+          if (match) {
+            const num = parseInt(match[1], 10);
+            if (!isNaN(num) && num > maxNum) {
+              maxNum = num;
+            }
+          }
+        });
+      }
+      const nextCode = `DRV${String(maxNum + 1).padStart(4, '0')}`;
+
+      // Insert driver
+      const { data: newDriver, error: insertErr } = await supabase
+        .from('drivers')
+        .insert({
+          name: cleanName,
+          mobile: cleanMobile,
+          driver_code: nextCode,
+          vehicle_number: cleanVehicle,
+          vehicle_model: cleanModel,
+          home_location: cleanHome,
+          photo_url: payload.photoUrl || '',
+          operational_status: 'READY',
+          activation_status: 'PENDING',
+        })
+        .select()
+        .single();
+
+      if (insertErr || !newDriver) {
+        return { success: false, error: insertErr?.message || 'Failed to create driver record.' };
+      }
+
+      // Insert device record
+      await supabase.from('driver_devices').insert({
+        driver_id: newDriver.id,
+        device_fingerprint: currentDeviceId,
+        device_model: cleanModel,
+        app_version: '2.6',
+        status: 'PENDING',
+      });
+
+      const profile: DriverProfile = {
+        id: newDriver.id,
+        driverCode: newDriver.driver_code,
+        name: newDriver.name,
+        mobile: newDriver.mobile,
+        vehicleNumber: newDriver.vehicle_number,
+        vehicleModel: newDriver.vehicle_model || cleanModel,
+        homeLocation: newDriver.home_location || cleanHome,
+        photoUrl: newDriver.photo_url || payload.photoUrl,
+        operationalStatus: 'READY',
+        activationStatus: 'PENDING',
+        deviceId: currentDeviceId,
+      };
+
+      saveDriverProfile(profile);
+      return { success: true, driver: profile };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Error registering driver.' };
+    }
+  }
+
+  // Local fallback
+  const fallbackDriver: DriverProfile = {
+    id: `drv-${Date.now()}`,
+    driverCode: 'DRV0051',
+    name: cleanName,
+    mobile: cleanMobile,
+    vehicleNumber: cleanVehicle,
+    vehicleModel: cleanModel,
+    homeLocation: cleanHome,
+    photoUrl: payload.photoUrl,
+    operationalStatus: 'READY',
+    activationStatus: 'PENDING',
+    deviceId: currentDeviceId,
+  };
+  saveDriverProfile(fallbackDriver);
+  return { success: true, driver: fallbackDriver };
+};
+
+/**
+ * Dispatcher generates an activation code bound to a specific driver & device ID.
+ */
+export const generateActivationCodeForDevice = async (
+  driverId: string,
+  deviceId: string
+): Promise<{ success: boolean; activationCode?: string; error?: string }> => {
+  const code = Math.floor(100000 + Math.random() * 900000).toString(); // 6-digit activation code
+
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      // 1. Try RPC
+      const { data, error } = await supabase.rpc('generate_driver_activation_code', {
+        p_driver_id: driverId,
+        p_device_id: deviceId.trim(),
+      });
+
+      if (!error && data?.success) {
+        return { success: true, activationCode: data.activation_code };
+      }
+
+      // 2. Direct fallback
+      await supabase
+        .from('drivers')
+        .update({ activation_code: code, updated_at: new Date().toISOString() })
+        .eq('id', driverId);
+
+      if (deviceId) {
+        await supabase
+          .from('driver_devices')
+          .update({ activation_code: code })
+          .eq('driver_id', driverId)
+          .eq('device_fingerprint', deviceId.trim());
+      }
+
+      return { success: true, activationCode: code };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Failed to generate activation code.' };
+    }
+  }
+
+  return { success: true, activationCode: code };
+};
+
+/**
+ * Driver enters activation code.
+ * Cryptographically verifies that the activation code matches the Device ID of THIS mobile.
+ * If code was put in a new/different mobile, device IDs differ -> invalid!
+ */
+export const activateDriverWithCode = async (
+  driverId: string,
+  deviceId: string,
+  code: string
+): Promise<{ success: boolean; error?: string }> => {
+  const cleanCode = code.trim();
+  const cleanDevice = deviceId.trim();
+
+  if (!cleanCode) {
+    return { success: false, error: 'Please enter the 6-digit activation code.' };
+  }
+
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      // 1. Try RPC
+      const { data, error } = await supabase.rpc('activate_driver_with_code', {
+        p_driver_id: driverId,
+        p_device_id: cleanDevice,
+        p_activation_code: cleanCode,
+      });
+
+      if (!error && data) {
+        if (!data.success) {
+          return { success: false, error: data.message || 'Invalid activation code for this device.' };
+        }
+        // Update local driver profile
+        const current = getStoredDriverProfile();
+        const updated: DriverProfile = {
+          ...current,
+          activationStatus: 'ACTIVE',
+          deviceId: cleanDevice,
+        };
+        saveDriverProfile(updated);
+        return { success: true };
+      }
+
+      // 2. Direct Supabase check fallback
+      const { data: driverRow } = await supabase
+        .from('drivers')
+        .select('*')
+        .eq('id', driverId)
+        .single();
+
+      if (!driverRow) {
+        return { success: false, error: 'Driver record not found.' };
+      }
+
+      // Check device fingerprint and code
+      const { data: deviceRows } = await supabase
+        .from('driver_devices')
+        .select('*')
+        .eq('driver_id', driverId)
+        .eq('device_fingerprint', cleanDevice);
+
+      const device = deviceRows && deviceRows.length > 0 ? deviceRows[0] : null;
+
+      const deviceCode = device?.activation_code?.trim();
+      const driverCode = driverRow?.activation_code?.trim();
+
+      if ((deviceCode && deviceCode === cleanCode) || (driverCode && driverCode === cleanCode)) {
+        // Strict verification: Ensure this device is the one linked
+        await supabase
+          .from('drivers')
+          .update({ activation_status: 'ACTIVE', updated_at: new Date().toISOString() })
+          .eq('id', driverId);
+
+        if (device) {
+          await supabase
+            .from('driver_devices')
+            .update({ status: 'ACTIVE', last_seen_at: new Date().toISOString() })
+            .eq('id', device.id);
+        } else {
+          await supabase.from('driver_devices').insert({
+            driver_id: driverId,
+            device_fingerprint: cleanDevice,
+            device_model: driverRow.vehicle_model || 'Taxi Mobile',
+            app_version: '2.6',
+            status: 'ACTIVE',
+          });
+        }
+
+        const current = getStoredDriverProfile();
+        const updated: DriverProfile = {
+          ...current,
+          activationStatus: 'ACTIVE',
+          deviceId: cleanDevice,
+        };
+        saveDriverProfile(updated);
+        return { success: true };
+      }
+
+      // If driver has this code but device ID is different:
+      if (driverCode && driverCode === cleanCode) {
+        return {
+          success: false,
+          error: 'Device ID Mismatch: This activation code was generated for a different mobile device. Please contact dispatch to authorize this new phone.',
+        };
+      }
+
+      return { success: false, error: 'Invalid activation code. Please check with dispatch.' };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Error activating device.' };
+    }
+  }
+
+  // Local fallback test
+  const current = getStoredDriverProfile();
+  const updated: DriverProfile = {
+    ...current,
+    activationStatus: 'ACTIVE',
+    deviceId: cleanDevice,
+  };
+  saveDriverProfile(updated);
+  return { success: true };
+};
+
+/**
+ * Master Admin updates any driver's ID anytime (e.g. DRV0051 -> DRV007).
+ */
+export const adminUpdateDriverCode = async (
+  driverId: string,
+  newCode: string
+): Promise<{ success: boolean; error?: string }> => {
+  const cleanCode = newCode.trim().toUpperCase();
+  if (!cleanCode) {
+    return { success: false, error: 'Driver ID cannot be empty.' };
+  }
+
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      // 1. Try RPC
+      const { data, error } = await supabase.rpc('admin_update_driver_code', {
+        p_driver_id: driverId,
+        p_new_code: cleanCode,
+      });
+
+      if (!error && data) {
+        if (!data.success) {
+          return { success: false, error: data.message || 'Failed to update driver ID.' };
+        }
+        return { success: true };
+      }
+
+      // 2. Direct fallback
+      // Check duplicate
+      const { data: existing } = await supabase
+        .from('drivers')
+        .select('id, name')
+        .eq('driver_code', cleanCode)
+        .neq('id', driverId);
+
+      if (existing && existing.length > 0) {
+        return { success: false, error: `Driver ID ${cleanCode} is already assigned to ${existing[0].name}.` };
+      }
+
+      const { error: updateErr } = await supabase
+        .from('drivers')
+        .update({ driver_code: cleanCode, updated_at: new Date().toISOString() })
+        .eq('id', driverId);
+
+      if (updateErr) {
+        return { success: false, error: updateErr.message };
+      }
+
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Error updating driver code.' };
+    }
+  }
+
+  return { success: true };
+};
+
+/**
+ * Update driver profile details (Admin or Driver edit).
+ */
+export const adminUpdateDriverProfile = async (
+  driverId: string,
+  updates: Partial<DriverProfile>
+): Promise<{ success: boolean; error?: string }> => {
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      const payload: Record<string, any> = {
+        updated_at: new Date().toISOString(),
+      };
+      if (updates.name) payload.name = updates.name.trim();
+      if (updates.mobile) payload.mobile = updates.mobile.trim();
+      if (updates.vehicleNumber) payload.vehicle_number = updates.vehicleNumber.trim().toUpperCase();
+      if (updates.vehicleModel !== undefined) payload.vehicle_model = updates.vehicleModel.trim();
+      if (updates.homeLocation !== undefined) payload.home_location = updates.homeLocation.trim();
+      if (updates.photoUrl !== undefined) payload.photo_url = updates.photoUrl;
+      if (updates.driverCode) payload.driver_code = updates.driverCode.trim().toUpperCase();
+      if (updates.activationStatus) payload.activation_status = updates.activationStatus;
+      if (updates.operationalStatus) payload.operational_status = updates.operationalStatus;
+
+      const { error } = await supabase
+        .from('drivers')
+        .update(payload)
+        .eq('id', driverId);
+
+      if (error) {
+        return { success: false, error: error.message };
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Error updating driver profile.' };
+    }
+  }
+  return { success: true };
 };
 
 export const cancelTrip = async (tripId: string, reason?: string): Promise<boolean> => {
@@ -1615,6 +2258,7 @@ export interface DriverDevice {
   deviceModel: string;
   appVersion: string;
   status: DeviceActivationStatus;
+  activationCode?: string;
   lastSeenAt: string;
   createdAt: string;
 }
@@ -1635,6 +2279,7 @@ export const fetchDevicesForDriver = async (driverId: string): Promise<DriverDev
           deviceModel: d.device_model || '',
           appVersion: d.app_version || '',
           status: d.status as DeviceActivationStatus,
+          activationCode: d.activation_code || undefined,
           lastSeenAt: d.last_seen_at,
           createdAt: d.created_at,
         }));

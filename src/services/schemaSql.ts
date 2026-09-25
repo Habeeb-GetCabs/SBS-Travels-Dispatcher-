@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS public.drivers (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
--- Ensure auth_user_id exists if public.drivers was created prior to Phase 2.2C
+-- Ensure columns exist if public.drivers was created prior to Phase 2.4
 DO $$ 
 BEGIN
     IF NOT EXISTS (
@@ -67,6 +67,46 @@ BEGIN
     ) THEN
         ALTER TABLE public.drivers 
         ADD COLUMN auth_user_id UUID REFERENCES auth.users(id) ON DELETE SET NULL;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+          AND table_name = 'drivers' 
+          AND column_name = 'photo_url'
+    ) THEN
+        ALTER TABLE public.drivers ADD COLUMN photo_url TEXT;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+          AND table_name = 'drivers' 
+          AND column_name = 'home_location'
+    ) THEN
+        ALTER TABLE public.drivers ADD COLUMN home_location TEXT;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+          AND table_name = 'drivers' 
+          AND column_name = 'activation_code'
+    ) THEN
+        ALTER TABLE public.drivers ADD COLUMN activation_code TEXT;
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1 
+        FROM information_schema.columns 
+        WHERE table_schema = 'public' 
+          AND table_name = 'driver_devices' 
+          AND column_name = 'activation_code'
+    ) THEN
+        ALTER TABLE public.driver_devices ADD COLUMN activation_code TEXT;
     END IF;
 END $$;
 
@@ -955,4 +995,688 @@ $$;
 SELECT public.provision_production_admin_user('Bash@gettaxi.in', 'Basheer', 'MASTER_ADMIN'::user_role);
 SELECT public.provision_production_admin_user('santhosh@sgstravels.online', 'Santhosh', 'DISPATCHER'::user_role);
 SELECT public.provision_production_admin_user('sathish@quicktaxi.co.in', 'Sathish', 'DISPATCHER'::user_role);
+
+-- 7. DRIVER AUTH BINDING & PROVISIONING FUNCTIONS
+CREATE OR REPLACE FUNCTION public.ensure_driver_auth_account(
+    p_driver_identifier TEXT,
+    p_password TEXT DEFAULT 'SbsTravels@2026!'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, auth, extensions
+AS $$
+DECLARE
+    v_clean_id TEXT;
+    v_driver RECORD;
+    v_email TEXT;
+    v_auth_user_id UUID;
+BEGIN
+    v_clean_id := trim(p_driver_identifier);
+    IF v_clean_id = '' THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Driver identifier is required.');
+    END IF;
+
+    -- Match by driver_code, email prefix, or mobile
+    SELECT * INTO v_driver
+    FROM public.drivers
+    WHERE upper(driver_code) = upper(split_part(v_clean_id, '@', 1))
+       OR mobile = v_clean_id
+       OR upper(driver_code) = upper(v_clean_id)
+       OR mobile LIKE '%' || right(regexp_replace(v_clean_id, '[^0-9]', '', 'g'), 10)
+    LIMIT 1;
+
+    IF v_driver.id IS NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'message', 'No registered fleet driver found matching "' || v_clean_id || '". Please check with Dispatch.'
+        );
+    END IF;
+
+    v_email := lower(v_driver.driver_code) || '@sbstravels.com';
+
+    -- Check if auth.users record exists
+    SELECT id INTO v_auth_user_id
+    FROM auth.users
+    WHERE lower(email) = v_email;
+
+    IF v_auth_user_id IS NOT NULL THEN
+        UPDATE auth.users
+        SET 
+            email_confirmed_at = COALESCE(email_confirmed_at, NOW()),
+            encrypted_password = crypt(COALESCE(p_password, 'SbsTravels@2026!'), gen_salt('bf')),
+            updated_at = NOW()
+        WHERE id = v_auth_user_id;
+    ELSE
+        v_auth_user_id := gen_random_uuid();
+        INSERT INTO auth.users (
+            id,
+            instance_id,
+            email,
+            encrypted_password,
+            email_confirmed_at,
+            aud,
+            role,
+            raw_app_meta_data,
+            raw_user_meta_data,
+            is_super_admin,
+            created_at,
+            updated_at
+        ) VALUES (
+            v_auth_user_id,
+            '00000000-0000-0000-0000-000000000000',
+            v_email,
+            crypt(COALESCE(p_password, 'SbsTravels@2026!'), gen_salt('bf')),
+            NOW(),
+            'authenticated',
+            'authenticated',
+            '{"provider": "email", "providers": ["email"]}'::jsonb,
+            jsonb_build_object('full_name', v_driver.name, 'role', 'DRIVER', 'driver_code', v_driver.driver_code),
+            false,
+            NOW(),
+            NOW()
+        );
+    END IF;
+
+    -- Link driver record with authoritative auth_user_id
+    UPDATE public.drivers
+    SET 
+        auth_user_id = v_auth_user_id,
+        updated_at = NOW()
+    WHERE id = v_driver.id;
+
+    -- Ensure device record exists in public.driver_devices
+    INSERT INTO public.driver_devices (driver_id, device_fingerprint, device_model, app_version, status)
+    VALUES (v_driver.id, 'DEV-SBS-' || v_driver.driver_code, COALESCE(v_driver.vehicle_model, 'Taxi Mobile'), '2.6', 'ACTIVE')
+    ON CONFLICT (driver_id, device_fingerprint) DO UPDATE SET status = 'ACTIVE';
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'email', v_email,
+        'driver_code', v_driver.driver_code,
+        'name', v_driver.name,
+        'driver_id', v_driver.id,
+        'auth_user_id', v_auth_user_id,
+        'message', 'Driver auth account linked successfully.'
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.ensure_driver_auth_account(TEXT, TEXT) TO anon, authenticated;
+
+-- Provision driver RPC with integrated auth user creation
+CREATE OR REPLACE FUNCTION public.provision_driver_account(
+    p_name TEXT,
+    p_mobile TEXT,
+    p_driver_code TEXT,
+    p_vehicle_number TEXT,
+    p_vehicle_model TEXT DEFAULT 'Taxi',
+    p_operational_status TEXT DEFAULT 'OFFLINE',
+    p_activation_status TEXT DEFAULT 'ACTIVE',
+    p_auth_user_id UUID DEFAULT NULL,
+    p_password TEXT DEFAULT 'SbsTravels@2026!'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, auth, extensions
+AS $$
+DECLARE
+    v_new_id UUID;
+    v_auth_user_id UUID := p_auth_user_id;
+    v_email TEXT;
+    v_driver RECORD;
+BEGIN
+    IF p_name IS NULL OR trim(p_name) = '' OR
+       p_mobile IS NULL OR trim(p_mobile) = '' OR
+       p_driver_code IS NULL OR trim(p_driver_code) = '' OR
+       p_vehicle_number IS NULL OR trim(p_vehicle_number) = '' THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'message', 'Driver name, mobile number, unique code, and vehicle number are required.'
+        );
+    END IF;
+
+    -- Prevent duplicates
+    IF EXISTS (SELECT 1 FROM public.drivers WHERE mobile = trim(p_mobile)) THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'message', 'Duplicate error: A driver with mobile number ' || trim(p_mobile) || ' already exists.'
+        );
+    END IF;
+
+    IF EXISTS (SELECT 1 FROM public.drivers WHERE driver_code = upper(trim(p_driver_code))) THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'message', 'Duplicate error: Driver code ' || upper(trim(p_driver_code)) || ' is already assigned.'
+        );
+    END IF;
+
+    v_email := lower(trim(p_driver_code)) || '@sbstravels.com';
+    IF v_auth_user_id IS NULL THEN
+        SELECT id INTO v_auth_user_id FROM auth.users WHERE lower(email) = v_email;
+    END IF;
+
+    IF v_auth_user_id IS NOT NULL THEN
+        UPDATE auth.users
+        SET 
+            email_confirmed_at = COALESCE(email_confirmed_at, NOW()),
+            encrypted_password = crypt(COALESCE(p_password, 'SbsTravels@2026!'), gen_salt('bf')),
+            updated_at = NOW()
+        WHERE id = v_auth_user_id;
+    ELSE
+        v_auth_user_id := gen_random_uuid();
+        INSERT INTO auth.users (
+            id,
+            instance_id,
+            email,
+            encrypted_password,
+            email_confirmed_at,
+            aud,
+            role,
+            raw_app_meta_data,
+            raw_user_meta_data,
+            is_super_admin,
+            created_at,
+            updated_at
+        ) VALUES (
+            v_auth_user_id,
+            '00000000-0000-0000-0000-000000000000',
+            v_email,
+            crypt(COALESCE(p_password, 'SbsTravels@2026!'), gen_salt('bf')),
+            NOW(),
+            'authenticated',
+            'authenticated',
+            '{"provider": "email", "providers": ["email"]}'::jsonb,
+            jsonb_build_object('full_name', trim(p_name), 'role', 'DRIVER', 'driver_code', upper(trim(p_driver_code))),
+            false,
+            NOW(),
+            NOW()
+        );
+    END IF;
+
+    INSERT INTO public.drivers (
+        name,
+        mobile,
+        driver_code,
+        vehicle_number,
+        vehicle_model,
+        operational_status,
+        activation_status,
+        auth_user_id,
+        created_at,
+        updated_at
+    ) VALUES (
+        trim(p_name),
+        trim(p_mobile),
+        upper(trim(p_driver_code)),
+        upper(trim(p_vehicle_number)),
+        COALESCE(trim(p_vehicle_model), 'Taxi'),
+        COALESCE(p_operational_status, 'OFFLINE')::driver_operational_status,
+        COALESCE(p_activation_status, 'ACTIVE')::device_activation_status,
+        v_auth_user_id,
+        NOW(),
+        NOW()
+    )
+    RETURNING id INTO v_new_id;
+
+    INSERT INTO public.driver_devices (driver_id, device_fingerprint, device_model, app_version, status)
+    VALUES (v_new_id, 'DEV-SBS-' || upper(trim(p_driver_code)), COALESCE(trim(p_vehicle_model), 'Taxi Mobile'), '2.6', 'ACTIVE')
+    ON CONFLICT (driver_id, device_fingerprint) DO UPDATE SET status = 'ACTIVE';
+
+    SELECT * INTO v_driver FROM public.drivers WHERE id = v_new_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'loginEmail', v_email,
+        'loginPassword', COALESCE(p_password, 'SbsTravels@2026!'),
+        'driver', jsonb_build_object(
+            'id', v_driver.id,
+            'authUserId', v_driver.auth_user_id,
+            'driverCode', v_driver.driver_code,
+            'name', v_driver.name,
+            'mobile', v_driver.mobile,
+            'vehicleNumber', v_driver.vehicle_number,
+            'vehicleModel', v_driver.vehicle_model,
+            'operationalStatus', v_driver.operational_status,
+            'activationStatus', v_driver.activation_status,
+            'deviceId', 'DEV-SBS-' || v_driver.driver_code,
+            'created_at', v_driver.created_at,
+            'updated_at', v_driver.updated_at
+        )
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.provision_driver_account(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, UUID, TEXT) TO authenticated, anon;
+
+-- ==============================================================================
+-- PHASE 2.4: DEVICE ID & ACTIVATION CODE FUNCTIONS (NO DRIVER PASSWORDS)
+-- ==============================================================================
+
+-- 1. Self-register driver with photo from gallery, home location, and auto DRV0051+
+CREATE OR REPLACE FUNCTION public.register_driver_onboarding(
+    p_name TEXT,
+    p_mobile TEXT,
+    p_vehicle_number TEXT,
+    p_vehicle_model TEXT DEFAULT 'Taxi',
+    p_home_location TEXT DEFAULT '',
+    p_photo_url TEXT DEFAULT '',
+    p_device_id TEXT DEFAULT ''
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_clean_mobile TEXT;
+    v_clean_name TEXT;
+    v_clean_vehicle TEXT;
+    v_clean_device TEXT;
+    v_new_code TEXT;
+    v_max_num INT;
+    v_new_id UUID;
+    v_existing RECORD;
+BEGIN
+    v_clean_mobile := trim(p_mobile);
+    v_clean_name := trim(p_name);
+    v_clean_vehicle := upper(trim(p_vehicle_number));
+    v_clean_device := trim(p_device_id);
+
+    IF v_clean_mobile = '' OR v_clean_name = '' OR v_clean_vehicle = '' THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Name, mobile number, and vehicle number are required.');
+    END IF;
+
+    -- Check if mobile already exists
+    SELECT * INTO v_existing FROM public.drivers WHERE mobile = v_clean_mobile LIMIT 1;
+    IF v_existing.id IS NOT NULL THEN
+        -- If already exists, return existing profile so device can be registered
+        RETURN jsonb_build_object(
+            'success', true,
+            'already_registered', true,
+            'driver_id', v_existing.id,
+            'driver_code', v_existing.driver_code,
+            'name', v_existing.name,
+            'activation_status', v_existing.activation_status,
+            'message', 'Driver already registered. Request activation code from dispatch.'
+        );
+    END IF;
+
+    -- Calculate next driver code: range DRV0001-DRV0050 reserved for admin.
+    -- Standard self-registration auto-increments starting at DRV0051.
+    SELECT COALESCE(MAX(
+        CASE 
+            WHEN driver_code ~ '^DRV[0-9]+$' 
+            THEN SUBSTRING(driver_code FROM 4)::INTEGER 
+            ELSE 0 
+        END
+    ), 50) INTO v_max_num
+    FROM public.drivers;
+
+    IF v_max_num < 50 THEN
+        v_max_num := 50;
+    END IF;
+
+    v_new_code := 'DRV' || LPAD((v_max_num + 1)::TEXT, 4, '0');
+
+    -- Insert new driver with PENDING activation
+    INSERT INTO public.drivers (
+        name,
+        mobile,
+        driver_code,
+        vehicle_number,
+        vehicle_model,
+        home_location,
+        photo_url,
+        operational_status,
+        activation_status,
+        created_at,
+        updated_at
+    ) VALUES (
+        v_clean_name,
+        v_clean_mobile,
+        v_new_code,
+        v_clean_vehicle,
+        COALESCE(trim(p_vehicle_model), 'Taxi'),
+        trim(p_home_location),
+        p_photo_url,
+        'READY',
+        'PENDING',
+        NOW(),
+        NOW()
+    )
+    RETURNING id INTO v_new_id;
+
+    -- Register driver's unique device fingerprint
+    IF v_clean_device != '' THEN
+        INSERT INTO public.driver_devices (
+            driver_id,
+            device_fingerprint,
+            device_model,
+            app_version,
+            status
+        ) VALUES (
+            v_new_id,
+            v_clean_device,
+            COALESCE(trim(p_vehicle_model), 'Driver Mobile'),
+            '2.6',
+            'PENDING'
+        )
+        ON CONFLICT (driver_id, device_fingerprint) DO UPDATE 
+        SET status = 'PENDING';
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'driver_id', v_new_id,
+        'driver_code', v_new_code,
+        'name', v_clean_name,
+        'mobile', v_clean_mobile,
+        'vehicle_number', v_clean_vehicle,
+        'home_location', p_home_location,
+        'activation_status', 'PENDING',
+        'device_id', v_clean_device,
+        'message', 'Registration submitted! Please send your Device ID to Admin to receive your Activation Code.'
+    );
+END;
+$$;
+
+-- 2. Dispatcher generates activation code bound to specific driver + device ID
+CREATE OR REPLACE FUNCTION public.generate_driver_activation_code(
+    p_driver_id UUID,
+    p_device_id TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_code TEXT;
+    v_driver RECORD;
+BEGIN
+    SELECT * INTO v_driver FROM public.drivers WHERE id = p_driver_id;
+    IF v_driver.id IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Driver not found.');
+    END IF;
+
+    -- Generate a clean 6-digit numeric activation code (e.g. 748291)
+    v_code := (FLOOR(100000 + RANDOM() * 900000))::TEXT;
+
+    -- Update driver record
+    UPDATE public.drivers
+    SET activation_code = v_code, updated_at = NOW()
+    WHERE id = p_driver_id;
+
+    -- Bind specifically to this device fingerprint
+    IF p_device_id IS NOT NULL AND trim(p_device_id) != '' THEN
+        INSERT INTO public.driver_devices (
+            driver_id,
+            device_fingerprint,
+            device_model,
+            app_version,
+            status,
+            activation_code
+        ) VALUES (
+            p_driver_id,
+            trim(p_device_id),
+            COALESCE(v_driver.vehicle_model, 'Taxi Mobile'),
+            '2.6',
+            'PENDING',
+            v_code
+        )
+        ON CONFLICT (driver_id, device_fingerprint) 
+        DO UPDATE SET activation_code = v_code;
+    END IF;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'activation_code', v_code,
+        'driver_id', p_driver_id,
+        'driver_code', v_driver.driver_code,
+        'device_id', trim(p_device_id),
+        'driver_name', v_driver.name
+    );
+END;
+$$;
+
+-- 3. Driver activates app using activation code (Strict Device ID Check)
+CREATE OR REPLACE FUNCTION public.activate_driver_with_code(
+    p_driver_id UUID,
+    p_device_id TEXT,
+    p_activation_code TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_driver RECORD;
+    v_device RECORD;
+    v_clean_code TEXT;
+    v_clean_dev TEXT;
+BEGIN
+    v_clean_code := trim(p_activation_code);
+    v_clean_dev := trim(p_device_id);
+
+    SELECT * INTO v_driver FROM public.drivers WHERE id = p_driver_id;
+    IF v_driver.id IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Driver record not found.');
+    END IF;
+
+    -- Verify device fingerprint match
+    SELECT * INTO v_device FROM public.driver_devices 
+    WHERE driver_id = p_driver_id 
+      AND device_fingerprint = v_clean_dev;
+
+    -- Verification logic: Check device-bound code or driver code
+    IF (v_device.id IS NOT NULL AND v_device.activation_code IS NOT NULL AND trim(v_device.activation_code) = v_clean_code)
+       OR (v_driver.activation_code IS NOT NULL AND trim(v_driver.activation_code) = v_clean_code) THEN
+        
+        -- Success: Activate device and driver
+        UPDATE public.drivers
+        SET activation_status = 'ACTIVE', updated_at = NOW()
+        WHERE id = p_driver_id;
+
+        IF v_device.id IS NOT NULL THEN
+            UPDATE public.driver_devices
+            SET status = 'ACTIVE', last_seen_at = NOW()
+            WHERE id = v_device.id;
+        ELSE
+            INSERT INTO public.driver_devices (
+                driver_id,
+                device_fingerprint,
+                device_model,
+                app_version,
+                status
+            ) VALUES (
+                p_driver_id,
+                v_clean_dev,
+                COALESCE(v_driver.vehicle_model, 'Taxi Mobile'),
+                '2.6',
+                'ACTIVE'
+            )
+            ON CONFLICT (driver_id, device_fingerprint) DO UPDATE 
+            SET status = 'ACTIVE', last_seen_at = NOW();
+        END IF;
+
+        RETURN jsonb_build_object(
+            'success', true,
+            'message', 'Device successfully activated! You can now claim trips.',
+            'activation_status', 'ACTIVE',
+            'driver_id', v_driver.id,
+            'driver_code', v_driver.driver_code,
+            'name', v_driver.name
+        );
+    ELSE
+        -- Device ID mismatch or wrong code
+        IF v_driver.activation_code IS NOT NULL AND trim(v_driver.activation_code) = v_clean_code THEN
+            RETURN jsonb_build_object(
+                'success', false,
+                'message', 'Invalid Device ID: This activation code was generated for a different mobile device. Please contact dispatch to re-bind your new phone.'
+            );
+        ELSE
+            RETURN jsonb_build_object(
+                'success', false,
+                'message', 'Invalid Activation Code. Please check the code provided by dispatch.'
+            );
+        END IF;
+    END IF;
+END;
+$$;
+
+-- 4. Master Admin can update Driver ID anytime (e.g. DRV0051 -> DRV007)
+CREATE OR REPLACE FUNCTION public.admin_update_driver_code(
+    p_driver_id UUID,
+    p_new_code TEXT
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+    v_clean_code TEXT;
+    v_existing RECORD;
+BEGIN
+    v_clean_code := upper(trim(p_new_code));
+    IF v_clean_code = '' THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Driver ID cannot be empty.');
+    END IF;
+
+    -- Check if another driver already has this code
+    SELECT * INTO v_existing FROM public.drivers 
+    WHERE driver_code = v_clean_code AND id != p_driver_id;
+
+    IF v_existing.id IS NOT NULL THEN
+        RETURN jsonb_build_object(
+            'success', false,
+            'message', 'Driver ID ' || v_clean_code || ' is already assigned to ' || v_existing.name || '.'
+        );
+    END IF;
+
+    UPDATE public.drivers
+    SET driver_code = v_clean_code, updated_at = NOW()
+    WHERE id = p_driver_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'driver_id', p_driver_id,
+        'new_driver_code', v_clean_code,
+        'message', 'Driver ID updated successfully.'
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.register_driver_onboarding(TEXT, TEXT, TEXT, TEXT, TEXT, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.generate_driver_activation_code(UUID, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.activate_driver_with_code(UUID, TEXT, TEXT) TO anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.admin_update_driver_code(UUID, TEXT) TO anon, authenticated;
+
+-- Auto-provision/bind auth accounts for any existing drivers in public.drivers with NULL auth_user_id
+DO $$
+DECLARE
+    r RECORD;
+    v_res JSONB;
+BEGIN
+    FOR r IN SELECT driver_code FROM public.drivers LOOP
+        v_res := public.ensure_driver_auth_account(r.driver_code, 'SbsTravels@2026!');
+    END LOOP;
+END $$;
 `;
+
+// Focused 1-Click SQL to fix driver login & bind auth accounts for existing drivers
+export const SBS_DRIVER_AUTH_FIX_SQL = `-- SBS TRAVELS — 1-CLICK DRIVER LOGIN & AUTH BIND FIX
+-- Copy and run this in Supabase Dashboard -> SQL Editor
+-- This automatically creates & links auth accounts for DRV002 and all drivers!
+
+CREATE OR REPLACE FUNCTION public.ensure_driver_auth_account(
+    p_driver_identifier TEXT,
+    p_password TEXT DEFAULT 'SbsTravels@2026!'
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = pg_catalog, public, auth, extensions
+AS $$
+DECLARE
+    v_clean_id TEXT;
+    v_driver RECORD;
+    v_email TEXT;
+    v_auth_user_id UUID;
+BEGIN
+    v_clean_id := trim(p_driver_identifier);
+    IF v_clean_id = '' THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Driver identifier is required.');
+    END IF;
+
+    SELECT * INTO v_driver
+    FROM public.drivers
+    WHERE upper(driver_code) = upper(split_part(v_clean_id, '@', 1))
+       OR mobile = v_clean_id
+       OR upper(driver_code) = upper(v_clean_id)
+       OR mobile LIKE '%' || right(regexp_replace(v_clean_id, '[^0-9]', '', 'g'), 10)
+    LIMIT 1;
+
+    IF v_driver.id IS NULL THEN
+        RETURN jsonb_build_object('success', false, 'message', 'Driver not found: ' || v_clean_id);
+    END IF;
+
+    v_email := lower(v_driver.driver_code) || '@sbstravels.com';
+
+    SELECT id INTO v_auth_user_id FROM auth.users WHERE lower(email) = v_email;
+
+    IF v_auth_user_id IS NOT NULL THEN
+        UPDATE auth.users
+        SET email_confirmed_at = COALESCE(email_confirmed_at, NOW()),
+            encrypted_password = crypt(COALESCE(p_password, 'SbsTravels@2026!'), gen_salt('bf')),
+            updated_at = NOW()
+        WHERE id = v_auth_user_id;
+    ELSE
+        v_auth_user_id := gen_random_uuid();
+        INSERT INTO auth.users (
+            id, instance_id, email, encrypted_password, email_confirmed_at,
+            aud, role, raw_app_meta_data, raw_user_meta_data, is_super_admin, created_at, updated_at
+        ) VALUES (
+            v_auth_user_id, '00000000-0000-0000-0000-000000000000', v_email,
+            crypt(COALESCE(p_password, 'SbsTravels@2026!'), gen_salt('bf')), NOW(),
+            'authenticated', 'authenticated', '{"provider": "email", "providers": ["email"]}'::jsonb,
+            jsonb_build_object('full_name', v_driver.name, 'role', 'DRIVER', 'driver_code', v_driver.driver_code),
+            false, NOW(), NOW()
+        );
+    END IF;
+
+    UPDATE public.drivers
+    SET auth_user_id = v_auth_user_id, updated_at = NOW()
+    WHERE id = v_driver.id;
+
+    INSERT INTO public.driver_devices (driver_id, device_fingerprint, device_model, app_version, status)
+    VALUES (v_driver.id, 'DEV-SBS-' || v_driver.driver_code, COALESCE(v_driver.vehicle_model, 'Taxi Mobile'), '2.6', 'ACTIVE')
+    ON CONFLICT (driver_id, device_fingerprint) DO UPDATE SET status = 'ACTIVE';
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'email', v_email,
+        'driver_code', v_driver.driver_code,
+        'name', v_driver.name,
+        'auth_user_id', v_auth_user_id
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.ensure_driver_auth_account(TEXT, TEXT) TO anon, authenticated;
+
+-- Run auto-bind for DRV002 and any existing fleet drivers
+DO $$
+DECLARE
+    r RECORD;
+    v_res JSONB;
+BEGIN
+    FOR r IN SELECT driver_code FROM public.drivers LOOP
+        v_res := public.ensure_driver_auth_account(r.driver_code, 'SbsTravels@2026!');
+    END LOOP;
+END $$;
+`;
+

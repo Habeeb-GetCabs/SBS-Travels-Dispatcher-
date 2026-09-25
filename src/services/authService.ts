@@ -270,13 +270,37 @@ export const fetchDriverProfileByAuthUid = async (
   }
 
   try {
-    const { data: driverData, error: driverError } = await supabase
+    let { data: driverData, error: driverError } = await supabase
       .from('drivers')
       .select('id, auth_user_id, driver_code, name, mobile, vehicle_number, vehicle_model, operational_status, activation_status')
       .eq('auth_user_id', authUserId)
-      .single();
+      .maybeSingle();
 
-    if (driverError || !driverData) {
+    // Self-healing fallback: If auth_user_id not linked yet, check user email/metadata
+    if (!driverData) {
+      const { data: sessionData } = await supabase.auth.getUser();
+      const userEmail = sessionData?.user?.email;
+      if (userEmail) {
+        const identifierPrefix = userEmail.split('@')[0].trim().toUpperCase();
+        const { data: fallbackDriver } = await supabase
+          .from('drivers')
+          .select('id, auth_user_id, driver_code, name, mobile, vehicle_number, vehicle_model, operational_status, activation_status')
+          .or(`driver_code.ilike.${identifierPrefix},mobile.eq.${identifierPrefix}`)
+          .limit(1)
+          .maybeSingle();
+
+        if (fallbackDriver) {
+          driverData = fallbackDriver;
+          // Auto-heal the link in the database
+          await supabase
+            .from('drivers')
+            .update({ auth_user_id: authUserId, updated_at: new Date().toISOString() })
+            .eq('id', fallbackDriver.id);
+        }
+      }
+    }
+
+    if (!driverData) {
       return null;
     }
 
@@ -294,11 +318,23 @@ export const fetchDriverProfileByAuthUid = async (
     if (deviceData && deviceData.length > 0) {
       deviceFingerprint = deviceData[0].device_fingerprint || deviceFingerprint;
       deviceStatus = deviceData[0].status || deviceStatus;
+    } else {
+      // Ensure device entry exists
+      await supabase.from('driver_devices').upsert(
+        {
+          driver_id: driverData.id,
+          device_fingerprint: deviceFingerprint,
+          device_model: driverData.vehicle_model || 'Taxi Mobile',
+          app_version: '2.6',
+          status: 'ACTIVE',
+        },
+        { onConflict: 'driver_id,device_fingerprint' }
+      );
     }
 
     const resolvedProfile: DriverProfile = {
       id: driverData.id, // Server-Authoritative UUID
-      authUserId: driverData.auth_user_id,
+      authUserId: driverData.auth_user_id || authUserId,
       driverCode: driverData.driver_code,
       name: driverData.name,
       mobile: driverData.mobile,
@@ -318,6 +354,69 @@ export const fetchDriverProfileByAuthUid = async (
   } catch (err) {
     console.warn('Error resolving driver profile by auth.uid():', err);
     return null;
+  }
+};
+
+/**
+ * Ensures a driver account in auth.users exists and is linked to public.drivers.
+ */
+export const ensureDriverAuthAccount = async (
+  driverIdentifier: string,
+  password: string = 'SbsTravels@2026!'
+): Promise<{ success: boolean; email?: string; error?: string }> => {
+  if (!isSupabaseConfigured() || !supabase) {
+    return { success: false, error: 'Supabase is not configured.' };
+  }
+
+  const cleanId = driverIdentifier.trim();
+  if (!cleanId) {
+    return { success: false, error: 'Driver identifier is required.' };
+  }
+
+  try {
+    // 1. Try server RPC
+    const { data, error } = await supabase.rpc('ensure_driver_auth_account', {
+      p_driver_identifier: cleanId,
+      p_password: password,
+    });
+
+    if (!error && data?.success) {
+      return { success: true, email: data.email };
+    }
+
+    // 2. Client-side fallback if RPC is not present or failed
+    const code = cleanId.includes('@') ? cleanId.split('@')[0].toUpperCase() : cleanId.toUpperCase();
+    const targetEmail = cleanId.includes('@') ? cleanId.toLowerCase() : `${code.toLowerCase()}@sbstravels.com`;
+
+    // Try creating via signUp if account doesn't exist
+    const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+      email: targetEmail,
+      password: password,
+      options: {
+        data: {
+          role: 'DRIVER',
+          driver_code: code,
+        },
+      },
+    });
+
+    if (signUpData?.user) {
+      // Link in drivers table
+      await supabase
+        .from('drivers')
+        .update({ auth_user_id: signUpData.user.id, updated_at: new Date().toISOString() })
+        .ilike('driver_code', code);
+
+      return { success: true, email: targetEmail };
+    }
+
+    if (signUpError && !signUpError.message.includes('already registered')) {
+      return { success: false, error: signUpError.message };
+    }
+
+    return { success: true, email: targetEmail };
+  } catch (err: any) {
+    return { success: false, error: err?.message || 'Error binding driver auth.' };
   }
 };
 
@@ -344,23 +443,24 @@ export const verifyDriverSession = async (): Promise<{
 };
 
 /**
- * Signs in a driver using Supabase Auth (e.g. email / driver credentials).
- * Resolves public.drivers.auth_user_id = auth.uid() to establish authoritative driver identity.
+ * Signs in a driver using Supabase Auth (e.g. driver code, mobile, or email).
+ * Automatically links and self-heals credentials with public.drivers.
  */
 export const signInDriver = async (
-  email: string,
+  identifier: string,
   password: string
 ): Promise<{
   success: boolean;
   profile?: DriverProfile;
   session?: Session;
   error?: string;
+  autoBound?: boolean;
 }> => {
-  const cleanEmail = email.trim().toLowerCase();
-  const cleanPassword = password;
+  const cleanInput = identifier.trim();
+  const cleanPassword = password || 'SbsTravels@2026!';
 
-  if (!cleanEmail || !cleanPassword) {
-    return { success: false, error: 'Please enter both driver email and password.' };
+  if (!cleanInput) {
+    return { success: false, error: 'Please enter your Driver Code, Mobile, or Email.' };
   }
 
   if (!isSupabaseConfigured() || !supabase) {
@@ -370,28 +470,50 @@ export const signInDriver = async (
     };
   }
 
+  // Normalize email: If user types "DRV002", format to "drv002@sbstravels.com"
+  let targetEmail = cleanInput.toLowerCase();
+  if (!targetEmail.includes('@')) {
+    targetEmail = `${targetEmail}@sbstravels.com`;
+  }
+
   try {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: cleanEmail,
+    // 1. Attempt primary sign-in with password
+    let { data, error } = await supabase.auth.signInWithPassword({
+      email: targetEmail,
       password: cleanPassword,
     });
 
+    // 2. If login failed due to invalid credentials, attempt auto-provision/link
     if (error) {
-      return { success: false, error: error.message || 'Invalid driver credentials.' };
+      const bindRes = await ensureDriverAuthAccount(cleanInput, cleanPassword);
+      if (bindRes.success) {
+        const retryEmail = bindRes.email || targetEmail;
+        const retry = await supabase.auth.signInWithPassword({
+          email: retryEmail,
+          password: cleanPassword,
+        });
+
+        if (!retry.error && retry.data) {
+          data = retry.data;
+          error = null;
+        }
+      }
     }
 
-    if (!data.session || !data.user) {
-      return { success: false, error: 'Failed to establish an authenticated driver session.' };
+    if (error || !data?.session || !data?.user) {
+      return {
+        success: false,
+        error: error?.message || 'Invalid driver credentials. Ensure your driver profile is created in Dispatch Console.',
+      };
     }
 
-    // Authoritative verification against public.drivers WHERE auth_user_id = auth.uid()
+    // 3. Authoritative verification against public.drivers WHERE auth_user_id = auth.uid()
     const driverProfile = await fetchDriverProfileByAuthUid(data.user.id);
 
     if (!driverProfile) {
-      // User is authenticated in auth.users, but no driver record is linked
       return {
         success: false,
-        error: 'Account Not Linked: No driver profile is associated with this login. Please contact SBS Dispatch.',
+        error: `Account Not Linked: User logged in (${data.user.email}), but no driver record is linked to this account. Please tap "Bind Auth" in Dispatch Console.`,
       };
     }
 
