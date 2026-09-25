@@ -39,6 +39,19 @@ jobs:
             chmod +x ./android/gradlew
           fi
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Build Web App & Bundle Assets into Android
+        run: |
+          npm ci || npm install
+          npm run build
+          mkdir -p ./android/app/src/main/assets
+          cp -r ./dist/* ./android/app/src/main/assets/
+          rm -f ./android/app/src/main/assets/app-debug.apk
+
       - name: Build Android Debug APK
         working-directory: ./android
         run: |

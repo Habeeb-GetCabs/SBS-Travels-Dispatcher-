@@ -38,9 +38,8 @@ class MainActivity : AppCompatActivity() {
         createNotificationChannels()
         requestAppPermissions()
 
-        // Load production/shared app URL (no dev session cookie barrier)
-        val targetUrl = "https://ais-pre-5ck7cmqnb5iqboanlakexu-1063211486846.asia-southeast1.run.app"
-        webView.loadUrl(targetUrl)
+        // Load bundled local web app (instant launch, offline capable, zero 404 server errors)
+        webView.loadUrl("file:///android_asset/index.html")
     }
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -52,6 +51,9 @@ class MainActivity : AppCompatActivity() {
         settings.setGeolocationEnabled(true)
         settings.cacheMode = WebSettings.LOAD_DEFAULT
         settings.allowFileAccess = true
+        settings.allowContentAccess = true
+        settings.allowFileAccessFromFileURLs = true
+        settings.allowUniversalAccessFromFileURLs = true
 
         val cookieManager = CookieManager.getInstance()
         cookieManager.setAcceptCookie(true)
