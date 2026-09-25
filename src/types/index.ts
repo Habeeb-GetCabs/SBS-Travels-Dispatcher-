@@ -61,6 +61,7 @@ export interface TariffConfig {
   parking: number;
   interstateTax: number;
   additionalCharges: number;
+  commissionCharge?: number;
   discount: number;
   roundingRule: 'ROUND_NEAREST' | 'CEIL' | 'FLOOR' | 'NONE';
   quotedAmount: number;

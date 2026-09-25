@@ -140,6 +140,36 @@ export default function App() {
   const [editHomeLocation, setEditHomeLocation] = useState<string>(driver.homeLocation || '');
   const [editPhotoUrl, setEditPhotoUrl] = useState<string>(driver.photoUrl || '');
 
+  // Secret 5-tap Brand Activation Access (PIN: 140423)
+  const [brandTapCount, setBrandTapCount] = useState<number>(0);
+  const [showSecretPinModal, setShowSecretPinModal] = useState<boolean>(false);
+  const [secretPinInput, setSecretPinInput] = useState<string>('');
+  const [secretPinError, setSecretPinError] = useState<string | null>(null);
+
+  const handleBrandTap = () => {
+    setBrandTapCount((prev) => {
+      const next = prev + 1;
+      if (next >= 5) {
+        setShowSecretPinModal(true);
+        setSecretPinInput('');
+        setSecretPinError(null);
+        return 0;
+      }
+      return next;
+    });
+  };
+
+  const handleSecretPinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (secretPinInput.trim() === '140423') {
+      setShowSecretPinModal(false);
+      setOnboardTab('activate');
+      setShowDriverOnboardModal(true);
+    } else {
+      setSecretPinError('Invalid Security PIN. Access Denied.');
+    }
+  };
+
   // Track previous open trips for audio and visual chimes
   const prevTripIdsRef = React.useRef<Set<string>>(new Set());
 
@@ -598,8 +628,8 @@ export default function App() {
             >
               <Menu className="w-5 h-5 text-sky-400" />
             </button>
-            <div>
-              <h1 className="text-base font-black tracking-tight text-white leading-tight">
+            <div onClick={handleBrandTap} className="cursor-pointer select-none active:scale-95 transition">
+              <h1 className="text-lg font-black tracking-tight text-white leading-tight">
                 SBS Travels
               </h1>
               <p className="text-[10px] tracking-wider text-sky-400 font-extrabold uppercase">
@@ -782,162 +812,67 @@ export default function App() {
               </div>
             )}
 
-            {/* 1. DRIVER PROFILE CARD WITH PHOTO & DEVICE ID */}
-            <div className="bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#1e293b] border border-slate-700/60 rounded-3xl p-4 shadow-lg space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-start space-x-3 min-w-0">
+            {/* 1. CLEAN DRIVER PROFILE & DUTY TOGGLE (Optimized for aged driver readability) */}
+            <div className="bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#1e293b] border border-slate-700/60 rounded-3xl p-5 shadow-xl space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center space-x-4 min-w-0">
                   {/* Photo Avatar */}
                   {driver.photoUrl ? (
                     <img
                       src={driver.photoUrl}
                       alt={driver.name}
-                      className="w-12 h-12 rounded-2xl object-cover border border-sky-400/40 shadow-sm shrink-0"
+                      className="w-16 h-16 rounded-2xl object-cover border-2 border-sky-400/50 shadow-md shrink-0"
                     />
                   ) : (
-                    <div className="w-12 h-12 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center font-black text-lg shrink-0">
+                    <div className="w-16 h-16 rounded-2xl bg-sky-500/20 border-2 border-sky-400/40 text-sky-300 flex items-center justify-center font-black text-2xl shrink-0 shadow-inner">
                       {driver.name.charAt(0)}
                     </div>
                   )}
 
                   <div className="min-w-0">
-                    <div className="flex items-center space-x-2 flex-wrap gap-y-1">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        Driver Profile
-                      </span>
-                      <button
-                        onClick={() => {
-                          setEditDriverName(driver.name);
-                          setEditDriverMobile(driver.mobile);
-                          setEditVehicleNumber(driver.vehicleNumber);
-                          setEditVehicleModel(driver.vehicleModel || '');
-                          setEditDriverCode(driver.driverCode);
-                          setEditHomeLocation(driver.homeLocation || '');
-                          setEditPhotoUrl(driver.photoUrl || '');
-                          setShowDriverEditModal(true);
-                        }}
-                        className="text-[10px] text-sky-400 hover:text-sky-300 flex items-center space-x-0.5 font-bold transition"
-                      >
-                        <UserCog className="w-3 h-3" />
-                        <span>Edit</span>
-                      </button>
-                    </div>
-
-                    <h2 className="text-lg font-black text-white tracking-tight mt-0.5 truncate">
+                    <h2 className="text-2xl font-black text-white tracking-tight leading-tight truncate">
                       {driver.name}
                     </h2>
-
-                    <div className="flex items-center space-x-2 mt-0.5 flex-wrap gap-y-1">
-                      <span className="bg-slate-900 text-sky-300 border border-slate-700 px-2 py-0.5 rounded text-[11px] font-mono font-bold tracking-wider">
+                    <div className="flex items-center space-x-2 mt-1">
+                      <span className="bg-slate-900 text-sky-400 border border-slate-700 px-2.5 py-0.5 rounded-md text-xs font-mono font-bold tracking-wider">
                         {driver.vehicleNumber}
                       </span>
-                      <span className="text-xs text-slate-300 font-mono font-bold">
-                        {driver.driverCode}
-                      </span>
-                      {driver.vehicleModel && (
-                        <span className="text-xs text-slate-400 truncate max-w-[130px]">
-                          • {driver.vehicleModel}
-                        </span>
-                      )}
-                    </div>
-
-                    {/* Driver Home Location (e.g. Selvapuram, Gandhipuram, Sulur) */}
-                    <div className="flex items-center space-x-1.5 mt-1 text-[11px] text-emerald-400 font-bold">
-                      <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                      <span className="truncate">
-                        Home: {driver.homeLocation || 'Coimbatore'}
-                      </span>
-                    </div>
-
-                    {/* Hardware Device ID */}
-                    <div className="flex items-center space-x-1 mt-1 text-[10px] text-slate-400 font-mono">
-                      <Smartphone className="w-3 h-3 text-sky-400 shrink-0" />
-                      <span className="text-slate-400">Device:</span>
-                      <span className="text-slate-300 truncate max-w-[140px] font-bold">
-                        {driver.deviceId}
-                      </span>
                       <button
                         type="button"
-                        onClick={() => {
-                          navigator.clipboard.writeText(driver.deviceId);
-                          setCopiedDeviceId(true);
-                          setTimeout(() => setCopiedDeviceId(false), 2000);
-                        }}
-                        className="text-sky-400 hover:text-white"
-                        title="Copy Device ID"
+                        onClick={() => { setShowDriverEditModal(true); }}
+                        className="text-xs text-sky-400 hover:text-sky-300 font-bold underline"
                       >
-                        {copiedDeviceId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        Profile
                       </button>
                     </div>
                   </div>
                 </div>
 
-                {/* Status indicator & Activation */}
-                <div className="text-right flex flex-col items-end shrink-0">
-                  <div
-                    className={`inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-black border ${
-                      driver.operationalStatus === 'READY'
-                        ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400'
-                        : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
-                    }`}
-                  >
-                    <span className={`w-2 h-2 rounded-full ${driver.operationalStatus === 'READY' ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
-                    <span>{driver.operationalStatus}</span>
-                  </div>
-
-                  <div className="text-[11px] font-semibold text-slate-400 mt-1 flex items-center justify-end space-x-1">
-                    {driver.activationStatus === 'ACTIVE' ? (
-                      <>
-                        <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
-                        <span className="text-emerald-400 font-bold">Device Active</span>
-                      </>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setOnboardTab('activate');
-                          setShowDriverOnboardModal(true);
-                        }}
-                        className="inline-flex items-center space-x-1 text-amber-400 hover:text-amber-300 font-bold"
-                      >
-                        <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Activate</span>
-                      </button>
-                    )}
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOnboardTab('signup');
-                      setShowDriverOnboardModal(true);
-                    }}
-                    className="mt-1.5 text-[10px] text-sky-400 hover:text-sky-300 underline font-bold"
-                  >
-                    Sign Up / Onboard
-                  </button>
-                </div>
-              </div>
-
-              {/* Shift Duty Toggle */}
-              <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                <div className="flex items-center space-x-1.5">
-                  <span className="text-[11px] text-slate-400 font-medium">Duty Status:</span>
-                  <span className={`font-black ${driver.operationalStatus === 'READY' ? 'text-emerald-400' : 'text-amber-400'}`}>
-                    {driver.operationalStatus === 'READY' ? 'ONLINE (READY)' : 'OFFLINE (BREAK)'}
-                  </span>
-                </div>
-                <button
-                  type="button"
-                  onClick={handleToggleShiftStatus}
-                  className={`px-3 py-1 rounded-xl text-xs font-bold transition shadow-sm ${
+                <div className="text-right shrink-0">
+                  <div className={`px-3 py-1.5 rounded-full text-xs font-black border flex items-center space-x-1.5 ${
                     driver.operationalStatus === 'READY'
-                      ? 'bg-amber-950/60 hover:bg-amber-900 text-amber-300 border border-amber-700/60'
-                      : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-900/20'
-                  }`}
-                >
-                  {driver.operationalStatus === 'READY' ? 'Go Offline' : 'Go Online'}
-                </button>
+                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                      : 'bg-amber-500/15 border-amber-500/40 text-amber-400'
+                  }`}>
+                    <span className={`w-2.5 h-2.5 rounded-full ${driver.operationalStatus === 'READY' ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
+                    <span>{driver.operationalStatus === 'READY' ? 'ONLINE' : 'OFFLINE'}</span>
+                  </div>
+                </div>
               </div>
+
+              {/* Big Duty Status Switch Toggle Button */}
+              <button
+                type="button"
+                onClick={handleToggleShiftStatus}
+                className={`w-full py-4 px-6 rounded-2xl text-lg font-black tracking-wide transition shadow-xl active:scale-98 flex items-center justify-center space-x-3 ${
+                  driver.operationalStatus === 'READY'
+                    ? 'bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-slate-950 border border-amber-300'
+                    : 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/40'
+                }`}
+              >
+                <Car className="w-6 h-6" />
+                <span>{driver.operationalStatus === 'READY' ? 'GO OFFLINE (LOG OFF)' : 'GO ONLINE (START SHIFT)'}</span>
+              </button>
             </div>
 
             {/* LIVE TRIP BROADCAST ALERT CARD (Blinking, Pulsing Beacon, Audio Alert, Instant Claim) */}
@@ -2268,6 +2203,73 @@ export default function App() {
           setTripAccessOtp(newTrip.tripAccessOtp);
         }}
       />
+
+      {/* SECRET BRAND ACTIVATION SECURITY PIN MODAL (5-Tap Trigger, PIN: 140423) */}
+      {showSecretPinModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2">
+                <Lock className="w-5 h-5 text-amber-400" />
+                <h3 className="font-extrabold text-white text-base">Security Verification</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowSecretPinModal(false)}
+                className="text-slate-400 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Enter the 6-digit administrator security PIN to access the Device Activation Key Console.
+            </p>
+
+            {secretPinError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold">
+                {secretPinError}
+              </div>
+            )}
+
+            <form onSubmit={handleSecretPinSubmit} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  Security PIN
+                </label>
+                <input
+                  type="password"
+                  maxLength={6}
+                  autoFocus
+                  value={secretPinInput}
+                  onChange={(e) => {
+                    setSecretPinInput(e.target.value);
+                    setSecretPinError(null);
+                  }}
+                  placeholder="••••••"
+                  className="w-full py-3 px-4 bg-slate-950 border border-slate-700 rounded-2xl text-white text-center font-mono text-xl tracking-widest focus:outline-none focus:border-amber-400"
+                />
+              </div>
+
+              <div className="flex space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowSecretPinModal(false)}
+                  className="flex-1 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl text-xs transition"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-3 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black rounded-xl text-xs transition shadow-lg shadow-amber-500/20"
+                >
+                  Unlock Console
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

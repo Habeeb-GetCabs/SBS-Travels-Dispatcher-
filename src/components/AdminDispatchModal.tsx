@@ -1081,7 +1081,7 @@ export const AdminDispatchModal: React.FC<Props> = ({
                     </div>
                     {/* Quick Preset Selector for Convenience */}
                     <div className="flex space-x-1">
-                      {['ONE_WAY', 'LOCAL', 'ROUND_TRIP', 'AIRPORT'].map((preset) => (
+                      {['LOCAL', 'HOURLY', 'ONE_WAY', 'ROUND_TRIP', 'AIRPORT'].map((preset) => (
                         <button
                           key={preset}
                           type="button"
@@ -1098,162 +1098,143 @@ export const AdminDispatchModal: React.FC<Props> = ({
                     </div>
                   </div>
 
-                  {/* Tariff Grid Inputs */}
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Base Fare (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.baseFare}
-                        onChange={(e) => setTariff({ ...tariff, baseFare: Number(e.target.value) })}
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
+                  {/* Tariff Grid Inputs - Tailored per trip type */}
+                  {tripType === 'LOCAL' ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Base Fare (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={tariff.baseFare}
+                          onChange={(e) => setTariff({ ...tariff, baseFare: Number(e.target.value) })}
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Per KM Charge (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={tariff.ratePerKm}
+                          onChange={(e) => setTariff({ ...tariff, ratePerKm: Number(e.target.value) })}
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Waiting Charge (₹/min)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={tariff.waitingRatePerMinute}
+                          onChange={(e) =>
+                            setTariff({ ...tariff, waitingRatePerMinute: Number(e.target.value) })
+                          }
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-amber-400 block mb-0.5">
+                          Commission Charge (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={tariff.commissionCharge || 0}
+                          onChange={(e) => setTariff({ ...tariff, commissionCharge: Number(e.target.value) })}
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-amber-500/40 rounded-lg text-amber-300 font-mono font-bold"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Included KM
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.includedKm}
-                        onChange={(e) => setTariff({ ...tariff, includedKm: Number(e.target.value) })}
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
+                  ) : tripType === 'HOURLY' ? (
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Per Hour Charge (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={tariff.baseFare}
+                          onChange={(e) => setTariff({ ...tariff, baseFare: Number(e.target.value) })}
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Free KM Box
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={tariff.includedKm}
+                          onChange={(e) => setTariff({ ...tariff, includedKm: Number(e.target.value) })}
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Additional Per KM (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={tariff.ratePerKm}
+                          onChange={(e) => setTariff({ ...tariff, ratePerKm: Number(e.target.value) })}
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Minimum KM
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.minimumKm}
-                        onChange={(e) => setTariff({ ...tariff, minimumKm: Number(e.target.value) })}
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
+                  ) : (
+                    <div className="grid grid-cols-3 gap-2.5">
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Base Fare (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={tariff.baseFare}
+                          onChange={(e) => setTariff({ ...tariff, baseFare: Number(e.target.value) })}
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Driver Bata (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          value={tariff.driverBata}
+                          onChange={(e) => setTariff({ ...tariff, driverBata: Number(e.target.value) })}
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                          Per KM Charge (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.5"
+                          value={tariff.ratePerKm}
+                          onChange={(e) => setTariff({ ...tariff, ratePerKm: Number(e.target.value) })}
+                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
+                        />
+                      </div>
                     </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Rate / KM (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.5"
-                        value={tariff.ratePerKm}
-                        onChange={(e) => setTariff({ ...tariff, ratePerKm: Number(e.target.value) })}
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Waiting ₹/min
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.waitingRatePerMinute}
-                        onChange={(e) =>
-                          setTariff({ ...tariff, waitingRatePerMinute: Number(e.target.value) })
-                        }
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Waiting Grace (min)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.waitingGraceMinutes}
-                        onChange={(e) =>
-                          setTariff({ ...tariff, waitingGraceMinutes: Number(e.target.value) })
-                        }
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Driver Bata (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.driverBata}
-                        onChange={(e) => setTariff({ ...tariff, driverBata: Number(e.target.value) })}
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Toll (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.toll}
-                        onChange={(e) => setTariff({ ...tariff, toll: Number(e.target.value) })}
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Parking (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.parking}
-                        onChange={(e) => setTariff({ ...tariff, parking: Number(e.target.value) })}
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Interstate Tax (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.interstateTax}
-                        onChange={(e) =>
-                          setTariff({ ...tariff, interstateTax: Number(e.target.value) })
-                        }
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Extra Charges (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.additionalCharges}
-                        onChange={(e) =>
-                          setTariff({ ...tariff, additionalCharges: Number(e.target.value) })
-                        }
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                        Discount (₹)
-                      </label>
-                      <input
-                        type="number"
-                        min="0"
-                        value={tariff.discount}
-                        onChange={(e) => setTariff({ ...tariff, discount: Number(e.target.value) })}
-                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                      />
-                    </div>
-                  </div>
+                  )}
                 </div>
 
                 {/* Pricing Summary Breakdown Card */}

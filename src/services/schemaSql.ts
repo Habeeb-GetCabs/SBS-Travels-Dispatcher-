@@ -210,6 +210,112 @@ CREATE INDEX IF NOT EXISTS idx_trips_claimed_driver ON public.trips(claimed_by_d
 CREATE INDEX IF NOT EXISTS idx_trips_created_at ON public.trips(created_at DESC);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_drivers_auth_user_id ON public.drivers(auth_user_id) WHERE auth_user_id IS NOT NULL;
 
+-- RPC 0: CREATE OPEN TRIP ATOMIC
+CREATE OR REPLACE FUNCTION public.create_open_trip_atomic(
+    p_trip_number TEXT,
+    p_customer_name TEXT,
+    p_customer_mobile TEXT,
+    p_pickup_address TEXT,
+    p_drop_address TEXT,
+    p_pickup_latitude NUMERIC DEFAULT NULL,
+    p_pickup_longitude NUMERIC DEFAULT NULL,
+    p_pickup_place_id TEXT DEFAULT NULL,
+    p_drop_latitude NUMERIC DEFAULT NULL,
+    p_drop_longitude NUMERIC DEFAULT NULL,
+    p_drop_place_id TEXT DEFAULT NULL,
+    p_trip_type TEXT DEFAULT 'ONE_WAY',
+    p_estimated_fare NUMERIC DEFAULT 0,
+    p_estimated_distance_km NUMERIC DEFAULT 0,
+    p_estimated_duration_minutes INTEGER DEFAULT 0,
+    p_tariff_config JSONB DEFAULT '{}'::jsonb,
+    p_notes TEXT DEFAULT NULL,
+    p_trip_access_otp TEXT DEFAULT NULL,
+    p_passenger_otp_required BOOLEAN DEFAULT FALSE,
+    p_passenger_verification_otp TEXT DEFAULT NULL
+)
+RETURNS JSONB
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public
+AS $$
+DECLARE
+    v_new_id UUID;
+    v_start_pin TEXT;
+    v_trip RECORD;
+BEGIN
+    v_start_pin := (FLOOR(1000 + RANDOM() * 9000))::TEXT;
+
+    INSERT INTO public.trips (
+        trip_number,
+        customer_name,
+        customer_mobile,
+        pickup_address,
+        drop_address,
+        pickup_latitude,
+        pickup_longitude,
+        pickup_place_id,
+        drop_latitude,
+        drop_longitude,
+        drop_place_id,
+        trip_type,
+        estimated_fare,
+        estimated_distance_km,
+        estimated_duration_minutes,
+        tariff_config,
+        notes,
+        status,
+        trip_access_otp,
+        is_otp_consumed,
+        passenger_otp_required,
+        passenger_verification_otp,
+        passenger_verification_status,
+        start_pin,
+        created_by,
+        created_at,
+        updated_at
+    ) VALUES (
+        p_trip_number,
+        p_customer_name,
+        p_customer_mobile,
+        p_pickup_address,
+        p_drop_address,
+        p_pickup_latitude,
+        p_pickup_longitude,
+        p_pickup_place_id,
+        p_drop_latitude,
+        p_drop_longitude,
+        p_drop_place_id,
+        p_trip_type,
+        p_estimated_fare,
+        p_estimated_distance_km,
+        p_estimated_duration_minutes,
+        COALESCE(p_tariff_config, '{}'::jsonb),
+        p_notes,
+        'OPEN'::trip_status,
+        p_trip_access_otp,
+        FALSE,
+        COALESCE(p_passenger_otp_required, FALSE),
+        p_passenger_verification_otp,
+        CASE WHEN p_passenger_otp_required = TRUE THEN 'PENDING' ELSE 'NOT_REQUIRED' END,
+        v_start_pin,
+        auth.uid(),
+        NOW(),
+        NOW()
+    )
+    RETURNING id INTO v_new_id;
+
+    SELECT * INTO v_trip FROM public.trips WHERE id = v_new_id;
+
+    RETURN jsonb_build_object(
+        'success', true,
+        'start_pin', v_start_pin,
+        'trip', row_to_json(v_trip)
+    );
+END;
+$$;
+
+GRANT EXECUTE ON FUNCTION public.create_open_trip_atomic TO authenticated, anon;
+
 -- RPC 1: ATOMIC TRIP CLAIM (Hardened with Driver Identity Verification)
 CREATE OR REPLACE FUNCTION public.claim_trip_atomic(
     p_driver_id UUID,
