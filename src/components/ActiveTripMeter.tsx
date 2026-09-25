@@ -29,16 +29,17 @@ import {
   clearActiveMeterSnapshot,
 } from '../services/tripService';
 import { calculateCustomTripFare, validateTariffConfig } from '../services/tariffService';
-import { soundEngine } from '../services/audioService';
+import { soundEngine, getStoredWelcomeMessage } from '../services/audioService';
 import { GpsHardeningEngine, GpsSignalState } from '../services/gpsFilter';
 
 interface Props {
   trip: Trip;
   driver: DriverProfile;
   onTripCompleted: (summary: CompletedTripData) => void;
+  onExitDemo?: () => void;
 }
 
-export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted }) => {
+export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted, onExitDemo }) => {
   // Validate custom tariff config
   const tariffCheck = validateTariffConfig(trip.tariffConfig);
 
@@ -102,9 +103,8 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
   // Start Chime, Voice Announcement & Android Foreground Service Bridge
   useEffect(() => {
     soundEngine.playMeterStart();
-    soundEngine.speak(
-      `SBS Travels meter started for trip ${trip.tripNumber}. Have a safe journey.`
-    );
+    const welcomeText = getStoredWelcomeMessage();
+    soundEngine.speak(welcomeText);
 
     // Start Native Android Foreground Service for persistent GPS tracking
     if (typeof window !== 'undefined' && (window as any).AndroidMeterBridge?.startForegroundMeter) {
@@ -410,6 +410,14 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
       }
     }
 
+    // For demo simulation trips, complete locally without remote Supabase RPC
+    if (trip.id === 'demo-trip-999' || trip.tripNumber?.startsWith('DEMO')) {
+      clearActiveMeterSnapshot(trip.id);
+      setIsFinishing(false);
+      onTripCompleted(summary);
+      return;
+    }
+
     // Atomic server-authoritative trip completion
     const res = await completeTripAtomic(trip.id, driver, summary);
     if (!res.success) {
@@ -578,6 +586,29 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
   // STANDARD HIGH-CONTRAST DIGITAL TAXI METER
   return (
     <div className="space-y-4 animate-in fade-in duration-200">
+      {/* Demo Mode Exit Bar */}
+      {(trip.id === 'demo-trip-999' || trip.tripNumber?.startsWith('DEMO') || onExitDemo) && (
+        <div className="bg-gradient-to-r from-rose-900 via-rose-950 to-slate-900 border border-rose-500/50 rounded-2xl p-3 flex items-center justify-between shadow-lg">
+          <div className="flex items-center space-x-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-400 animate-pulse" />
+            <span className="font-extrabold text-xs text-rose-200 uppercase tracking-wider">
+              Demo Simulation Active
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (onExitDemo) onExitDemo();
+              else clearActiveMeterSnapshot(trip.id);
+            }}
+            className="px-3.5 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-500 active:bg-rose-700 text-white font-black text-xs uppercase shadow transition flex items-center space-x-1.5"
+          >
+            <X className="w-3.5 h-3.5" />
+            <span>EXIT DEMO MODE</span>
+          </button>
+        </div>
+      )}
+
       {/* Top Status & Controls Bar */}
       <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 shadow-sm flex items-center justify-between">
         <div className="flex items-center space-x-2">

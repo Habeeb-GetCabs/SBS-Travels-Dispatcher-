@@ -224,4 +224,16 @@ class SoundEngine {
   }
 }
 
+const DEFAULT_WELCOME_MSG = "Welcome. Please fasten your seat belt. Have a safe journey.";
+
+export function getStoredWelcomeMessage(): string {
+  if (typeof window === 'undefined') return DEFAULT_WELCOME_MSG;
+  return localStorage.getItem('sbs_welcome_audio_msg') || DEFAULT_WELCOME_MSG;
+}
+
+export function saveWelcomeMessage(msg: string): void {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem('sbs_welcome_audio_msg', msg.trim() || DEFAULT_WELCOME_MSG);
+}
+
 export const soundEngine = new SoundEngine();

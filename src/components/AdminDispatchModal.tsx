@@ -1,5 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import {
+  supabaseUrl,
+  supabaseAnonKey,
+  isSupabaseConfigured,
+  saveSupabaseConfig,
+} from '../lib/supabase';
+import {
   Trip,
   TripType,
   DriverProfile,
@@ -93,7 +99,17 @@ interface Props {
   driver: DriverProfile;
   onDriverUpdated: (driver: DriverProfile) => void;
   onTripCreated: (trip: Trip) => void;
+  initialBypass?: boolean;
+  onLaunchDemoTrip?: () => void;
 }
+
+const MASTER_ADMIN_BYPASS_PROFILE: AdminUserProfile = {
+  id: '00000000-0000-0000-0000-000000000001',
+  email: 'admin@sbstravels.com',
+  fullName: 'Master Admin (Bypassed)',
+  role: 'MASTER_ADMIN',
+  createdAt: new Date().toISOString(),
+};
 
 export const AdminDispatchModal: React.FC<Props> = ({
   isOpen,
@@ -101,9 +117,13 @@ export const AdminDispatchModal: React.FC<Props> = ({
   driver,
   onDriverUpdated,
   onTripCreated,
+  initialBypass = false,
+  onLaunchDemoTrip,
 }) => {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [activeTab, setActiveTab] = useState<'create' | 'list' | 'drivers' | 'reports' | 'devices' | 'sql'>('create');
+  const [bypassPinInput, setBypassPinInput] = useState<string>('');
+  const [bypassError, setBypassError] = useState<string | null>(null);
   const [tripStatusFilter, setTripStatusFilter] = useState<'ALL' | 'OPEN' | 'CLAIMED' | 'ARRIVED' | 'STARTED' | 'COMPLETED' | 'CANCELLED'>('ALL');
   const [dateFilter, setDateFilter] = useState<DateFilterRange>('TODAY');
   const [customStartDate, setCustomStartDate] = useState<string>('');
@@ -144,6 +164,20 @@ export const AdminDispatchModal: React.FC<Props> = ({
   const [loginPassword, setLoginPassword] = useState<string>('');
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
+
+  // Supabase Configuration Input States
+  const [inputSupabaseUrl, setInputSupabaseUrl] = useState<string>(supabaseUrl || '');
+  const [inputSupabaseKey, setInputSupabaseKey] = useState<string>(supabaseAnonKey || '');
+  const [showSupabaseSetup, setShowSupabaseSetup] = useState<boolean>(!isSupabaseConfigured());
+
+  const handleSaveSupabaseSettings = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputSupabaseUrl.trim() || !inputSupabaseKey.trim()) {
+      alert('Please enter both your Supabase Project URL and Anon Public Key.');
+      return;
+    }
+    saveSupabaseConfig(inputSupabaseUrl.trim(), inputSupabaseKey.trim());
+  };
 
   // Credential 4: Passenger Verification OTP
   const [passengerOtpRequired, setPassengerOtpRequired] = useState(false);
@@ -310,49 +344,64 @@ export const AdminDispatchModal: React.FC<Props> = ({
     let unsubDrivers: (() => void) | null = null;
 
     if (isOpen) {
-      setAuthLoading(true);
-      verifyDispatcherSession().then(({ session, profile }) => {
+      if (initialBypass) {
+        setAdminProfile(MASTER_ADMIN_BYPASS_PROFILE);
         setAuthLoading(false);
-        if (profile && session) {
-          setAdminProfile(profile);
-          // Initial trips load
-          setTrips(getLocalTrips());
-          fetchTripsForDispatch().then((serverTrips) => {
-            if (serverTrips && serverTrips.length > 0) {
-              setTrips(serverTrips);
-            }
-          });
-
-          // Initial drivers load
-          const loadFleet = () => {
-            fetchDriversForDispatch().then((list) => {
-              if (list) setFleetDrivers(list);
+        setTrips(getLocalTrips());
+        fetchTripsForDispatch().then((serverTrips) => {
+          if (serverTrips && serverTrips.length > 0) setTrips(serverTrips);
+        });
+        fetchDriversForDispatch().then((list) => {
+          if (list) setFleetDrivers(list);
+        });
+      } else {
+        setAuthLoading(true);
+        verifyDispatcherSession().then(({ session, profile }) => {
+          setAuthLoading(false);
+          if (profile && session) {
+            setAdminProfile(profile);
+            // Initial trips load
+            setTrips(getLocalTrips());
+            fetchTripsForDispatch().then((serverTrips) => {
+              if (serverTrips && serverTrips.length > 0) {
+                setTrips(serverTrips);
+              }
             });
-          };
-          loadFleet();
 
-          // Live completed trips load
-          fetchCompletedTripsFromServer().catch(() => {});
-
-          unsubTrips = subscribeToTripsRealtime(() => {
-            fetchTripsForDispatch().then((updated) => {
-              if (updated) setTrips(updated);
-            });
-          });
-          unsubDrivers = subscribeToDriversRealtime(() => {
+            // Initial drivers load
+            const loadFleet = () => {
+              fetchDriversForDispatch().then((list) => {
+                if (list) setFleetDrivers(list);
+              });
+            };
             loadFleet();
-          });
-        } else {
-          setAdminProfile(null);
-        }
-      });
+
+            // Live completed trips load
+            fetchCompletedTripsFromServer().catch(() => {});
+
+            unsubTrips = subscribeToTripsRealtime(() => {
+              fetchTripsForDispatch().then((updated) => {
+                if (updated) setTrips(updated);
+              });
+            });
+            unsubDrivers = subscribeToDriversRealtime(() => {
+              loadFleet();
+            });
+          } else {
+            setAdminProfile(null);
+          }
+        });
+      }
     }
 
     const unsubAuth = onDispatcherAuthStateChange((session, profile) => {
       if (!profile) {
-        setAdminProfile(null);
-        if (unsubTrips) unsubTrips();
-        if (unsubDrivers) unsubDrivers();
+        // If not explicitly bypassed, clear profile
+        if (!initialBypass) {
+          setAdminProfile(null);
+          if (unsubTrips) unsubTrips();
+          if (unsubDrivers) unsubDrivers();
+        }
       } else {
         setAdminProfile(profile);
       }
@@ -363,7 +412,24 @@ export const AdminDispatchModal: React.FC<Props> = ({
       if (unsubTrips) unsubTrips();
       if (unsubDrivers) unsubDrivers();
     };
-  }, [isOpen]);
+  }, [isOpen, initialBypass]);
+
+  const handleBypassPinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (bypassPinInput.trim() === '140423') {
+      setAdminProfile(MASTER_ADMIN_BYPASS_PROFILE);
+      setBypassError(null);
+      setTrips(getLocalTrips());
+      fetchTripsForDispatch().then((serverTrips) => {
+        if (serverTrips && serverTrips.length > 0) setTrips(serverTrips);
+      });
+      fetchDriversForDispatch().then((list) => {
+        if (list) setFleetDrivers(list);
+      });
+    } else {
+      setBypassError('Invalid PIN. Master Access Denied.');
+    }
+  };
 
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -692,6 +758,63 @@ export const AdminDispatchModal: React.FC<Props> = ({
                 </p>
               </div>
 
+              {(!isSupabaseConfigured() || showSupabaseSetup) && (
+                <div className="p-4 rounded-2xl bg-amber-950/40 border border-amber-500/40 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Database className="w-4 h-4 text-amber-400" />
+                      <span className="text-xs font-bold text-amber-300">Supabase Project Credentials</span>
+                    </div>
+                    {isSupabaseConfigured() && (
+                      <button
+                        type="button"
+                        onClick={() => setShowSupabaseSetup(false)}
+                        className="text-slate-400 hover:text-white text-xs"
+                      >
+                        Close
+                      </button>
+                    )}
+                  </div>
+                  <p className="text-[11px] text-slate-300 leading-relaxed">
+                    Paste your <strong>Project URL</strong> and <strong>Anon Public Key</strong> from Supabase Dashboard (<strong>Settings &gt; API</strong>):
+                  </p>
+                  <form onSubmit={handleSaveSupabaseSettings} className="space-y-2.5">
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                        Supabase Project URL
+                      </label>
+                      <input
+                        type="url"
+                        value={inputSupabaseUrl}
+                        onChange={(e) => setInputSupabaseUrl(e.target.value)}
+                        placeholder="https://your-project.supabase.co"
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-amber-400"
+                        required
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                        Supabase Anon Key
+                      </label>
+                      <input
+                        type="password"
+                        value={inputSupabaseKey}
+                        onChange={(e) => setInputSupabaseKey(e.target.value)}
+                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                        className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-amber-400"
+                        required
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      className="w-full py-2.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black rounded-xl text-xs transition shadow-md"
+                    >
+                      Save &amp; Connect Supabase Database
+                    </button>
+                  </form>
+                </div>
+              )}
+
               {authError && (
                 <div className="p-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-start space-x-2.5">
                   <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-rose-400" />
@@ -755,14 +878,69 @@ export const AdminDispatchModal: React.FC<Props> = ({
                 </button>
               </form>
 
-              <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-500 text-center">
-                Access restricted to authorized <span className="text-slate-400 font-mono">MASTER_ADMIN</span>, <span className="text-slate-400 font-mono">ADMIN</span>, or <span className="text-slate-400 font-mono">DISPATCHER</span> personnel.
+              {/* Security Master PIN 140423 Bypass Form */}
+              <div className="pt-3.5 border-t border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-amber-400 flex items-center space-x-1">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+                    <span>Instant Master PIN Access</span>
+                  </span>
+                  <span className="text-[10px] text-slate-400 font-mono">PIN: 140423</span>
+                </div>
+                {bypassError && (
+                  <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px]">
+                    {bypassError}
+                  </div>
+                )}
+                <form onSubmit={handleBypassPinSubmit} className="flex space-x-2">
+                  <input
+                    type="password"
+                    value={bypassPinInput}
+                    onChange={(e) => {
+                      setBypassPinInput(e.target.value);
+                      setBypassError(null);
+                    }}
+                    placeholder="Enter Security PIN (140423)"
+                    className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-amber-400"
+                  />
+                  <button
+                    type="submit"
+                    className="px-4 py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black rounded-xl text-xs shadow transition shrink-0"
+                  >
+                    Bypass Login
+                  </button>
+                </form>
+              </div>
+
+              <div className="pt-2 border-t border-slate-800/80 text-[11px] text-slate-500 text-center space-y-1">
+                <div>
+                  Access restricted to authorized <span className="text-slate-400 font-mono">MASTER_ADMIN</span>, <span className="text-slate-400 font-mono">ADMIN</span>, or <span className="text-slate-400 font-mono">DISPATCHER</span> personnel.
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowSupabaseSetup(!showSupabaseSetup)}
+                  className="text-amber-400 hover:text-amber-300 font-bold underline transition"
+                >
+                  {showSupabaseSetup ? 'Hide Supabase Keys Form' : '⚙️ Configure / Edit Supabase URL & Anon Key'}
+                </button>
               </div>
             </div>
           </div>
         ) : (
           <>
         {/* Navigation Tabs */}
+        {onLaunchDemoTrip && (
+          <div className="pt-2 flex justify-end">
+            <button
+              type="button"
+              onClick={onLaunchDemoTrip}
+              className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-black text-xs shadow-md transition"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>🎓 Launch Driver Demo Ride Simulation</span>
+            </button>
+          </div>
+        )}
         <div className="flex space-x-1 pt-3 pb-2 text-xs overflow-x-auto no-scrollbar">
           <button
             onClick={() => setActiveTab('create')}

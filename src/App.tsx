@@ -28,6 +28,7 @@ import {
   Sparkles,
   Briefcase,
   Users,
+  Volume2,
 } from 'lucide-react';
 import {
   supabase,
@@ -65,9 +66,10 @@ import { AdminDispatchModal } from './components/AdminDispatchModal';
 import { TripDetails } from './components/TripDetails';
 import { ActiveTripMeter } from './components/ActiveTripMeter';
 import { TripSummaryModal } from './components/TripSummaryModal';
-import { soundEngine } from './services/audioService';
+import { soundEngine, getStoredWelcomeMessage, saveWelcomeMessage } from './services/audioService';
 import { notificationService } from './services/notificationService';
 import { SBS_TRAVELS_SQL_SCHEMA, SBS_DRIVER_AUTH_FIX_SQL } from './services/schemaSql';
+import { createDefaultTariffConfig } from './services/tariffService';
 import {
   verifyDriverSession,
   signInDriver,
@@ -90,7 +92,6 @@ import {
   Upload,
   Bell,
   BellRing,
-  Volume2,
   VolumeX,
   Smartphone,
   MapPin,
@@ -145,6 +146,12 @@ export default function App() {
   const [showSecretPinModal, setShowSecretPinModal] = useState<boolean>(false);
   const [secretPinInput, setSecretPinInput] = useState<string>('');
   const [secretPinError, setSecretPinError] = useState<string | null>(null);
+  const [adminBypassActive, setAdminBypassActive] = useState<boolean>(false);
+  const [customWelcomeMsg, setCustomWelcomeMsg] = useState<string>(() => getStoredWelcomeMessage());
+
+  // Driver Training Demo Simulation State
+  const [isDemoMode, setIsDemoMode] = useState<boolean>(false);
+  const [demoStep, setDemoStep] = useState<number>(1);
 
   const handleBrandTap = () => {
     setBrandTapCount((prev) => {
@@ -163,11 +170,61 @@ export default function App() {
     e.preventDefault();
     if (secretPinInput.trim() === '140423') {
       setShowSecretPinModal(false);
-      setOnboardTab('activate');
-      setShowDriverOnboardModal(true);
+      setAdminBypassActive(true);
+      setShowDispatchModal(true);
     } else {
       setSecretPinError('Invalid Security PIN. Access Denied.');
     }
+  };
+
+  const handleLaunchDemoTrip = () => {
+    const demoTrip: Trip = {
+      id: 'demo-trip-999',
+      tripNumber: 'DEMO-999',
+      customerName: 'Rahul Verma (Demo Passenger)',
+      customerMobile: '+91 98765 43210',
+      pickupAddress: 'Gandhipuram Bus Stand, Coimbatore',
+      dropAddress: 'Coimbatore International Airport (CJB)',
+      tripType: 'LOCAL',
+      estimatedFare: 480,
+      estimatedDistanceKm: 12.5,
+      estimatedDurationMinutes: 25,
+      tariffConfig: createDefaultTariffConfig('LOCAL'),
+      status: 'CLAIMED',
+      tripAccessOtp: '1234',
+      passengerOtpRequired: true,
+      passengerVerificationOtp: '1234',
+      isOtpConsumed: false,
+      createdAt: new Date().toISOString(),
+    };
+
+    setIsDemoMode(true);
+    setDemoStep(1);
+    setActiveTrip(demoTrip);
+    setActiveTripState(demoTrip);
+    setShowDispatchModal(false);
+    setShowHamburgerMenu(false);
+    setShowSettingsModal(false);
+  };
+
+  const handleDemoStartRide = () => {
+    if (!activeTrip) return;
+    const startedDemoTrip: Trip = {
+      ...activeTrip,
+      status: 'STARTED',
+      startedAt: new Date().toISOString(),
+    };
+    setActiveTrip(startedDemoTrip);
+    setActiveTripState(startedDemoTrip);
+    setDemoStep(2);
+    soundEngine.playClaimSuccess();
+  };
+
+  const handleExitDemoMode = () => {
+    setIsDemoMode(false);
+    setDemoStep(1);
+    setActiveTrip(null);
+    setActiveTripState(null);
   };
 
   // Track previous open trips for audio and visual chimes
@@ -600,6 +657,7 @@ export default function App() {
   const handleTripCompleted = (summary: CompletedTripData) => {
     setCompletedSummary(summary);
     setActiveTripState(null);
+    setActiveTrip(null);
     setCompletedList(getCompletedTrips());
     setShiftMetrics(getTodayShiftMetrics());
 
@@ -611,6 +669,9 @@ export default function App() {
 
   const handleSummaryDone = () => {
     setCompletedSummary(null);
+    if (isDemoMode) {
+      handleExitDemoMode();
+    }
     setActiveTab('home');
   };
 
@@ -650,6 +711,110 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {/* Interactive Driver Training & Demo Simulation Banner */}
+      {isDemoMode && (
+        <div className="bg-gradient-to-r from-purple-950 via-indigo-950 to-slate-900 border-b-2 border-amber-400 p-3 sm:p-4 text-white space-y-2.5 shadow-2xl z-20">
+          <div className="max-w-md mx-auto flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] uppercase tracking-wider animate-pulse">
+                DEMO MODE
+              </span>
+              <h3 className="font-black text-sm text-amber-300">🎓 Driver Interactive Demo Ride</h3>
+            </div>
+            <button
+              type="button"
+              onClick={handleExitDemoMode}
+              className="px-3 py-1 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs shadow"
+            >
+              Exit Demo
+            </button>
+          </div>
+
+          <div className="max-w-md mx-auto bg-slate-950/80 p-3 rounded-2xl border border-indigo-500/30 text-xs space-y-2">
+            {demoStep === 1 && (
+              <div className="space-y-1.5">
+                <p className="font-bold text-amber-300">STEP 1/4: Trip Acceptance &amp; OTP Verification</p>
+                <p className="text-slate-200">
+                  Customer <strong>Rahul Verma</strong> gives OTP <code className="bg-amber-400/20 text-amber-300 px-1 rounded font-mono font-bold">1234</code>.
+                </p>
+                <div className="flex items-center space-x-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={handleDemoStartRide}
+                    className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs shadow flex items-center space-x-1.5"
+                  >
+                    <span>⚡ Start Ride (Verify OTP 1234)</span>
+                  </button>
+                  <span className="text-[11px] text-slate-400">Or use 'Start Trip' card below</span>
+                </div>
+              </div>
+            )}
+
+            {demoStep === 2 && (
+              <div className="space-y-1.5">
+                <p className="font-bold text-amber-300">STEP 2/4: Live Fare Meter &amp; Distance Tracking</p>
+                <p className="text-slate-200">
+                  Trip is active! Simulate driving to watch live distance &amp; fare increase.
+                </p>
+                <div className="flex flex-wrap gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setActiveTripState((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              status: 'STARTED',
+                              startedAt: prev.startedAt || new Date().toISOString(),
+                            }
+                          : null
+                      );
+                    }}
+                    className="px-3 py-1 bg-sky-600 text-white rounded-xl font-bold text-xs"
+                  >
+                    Simulate Drive (+2.5 KM)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDemoStep(3)}
+                    className="px-3 py-1 bg-amber-500 text-slate-950 rounded-xl font-bold text-xs"
+                  >
+                    Next Step: Waiting Charges →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {demoStep === 3 && (
+              <div className="space-y-1.5">
+                <p className="font-bold text-amber-300">STEP 3/4: Waiting Time Charges</p>
+                <p className="text-slate-200">
+                  When waiting at traffic or signals, waiting charges add to the live fare.
+                </p>
+                <div className="pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setDemoStep(4)}
+                    className="px-3 py-1.5 bg-emerald-600 text-white rounded-xl font-bold text-xs"
+                  >
+                    Next Step: End Trip &amp; Receipt →
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {demoStep === 4 && (
+              <div className="space-y-1.5">
+                <p className="font-bold text-amber-300">STEP 4/4: End Ride &amp; Customer Receipt</p>
+                <p className="text-slate-200">
+                  Click 'END TRIP' or swipe below to generate the breakdown fare bill!
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Hamburger Navigation Drawer */}
       {showHamburgerMenu && (
@@ -741,6 +906,14 @@ export default function App() {
                 </button>
 
                 <button
+                  onClick={handleLaunchDemoTrip}
+                  className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl bg-purple-950/50 border border-purple-500/40 text-purple-300 hover:bg-purple-900/50 transition font-black"
+                >
+                  <Sparkles className="w-4 h-4 text-amber-300 animate-pulse" />
+                  <span>🎓 INTERACTIVE DEMO TRIP</span>
+                </button>
+
+                <button
                   onClick={() => { setActiveTab('about'); setShowHamburgerMenu(false); }}
                   className={`w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl transition ${activeTab === 'about' ? 'bg-gradient-to-r from-sky-600/20 to-blue-600/20 text-sky-400 border border-sky-500/30 font-black shadow-sm' : 'hover:bg-slate-800/60 text-slate-300'}`}
                 >
@@ -776,6 +949,7 @@ export default function App() {
             trip={activeTrip}
             driver={driver}
             onTripCompleted={handleTripCompleted}
+            onExitDemo={isDemoMode ? handleExitDemoMode : undefined}
           />
         )}
 
@@ -2146,6 +2320,35 @@ export default function App() {
                 </button>
               </div>
 
+              {/* Neutral Voice Welcome Announcement Config */}
+              <div className="p-3 bg-slate-950 border border-slate-800 rounded-2xl space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-bold text-white">Welcome Voice Announcement</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">Spoken when trip meter starts</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => soundEngine.speak(customWelcomeMsg)}
+                    className="px-2.5 py-1 bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-500/40 rounded-lg text-[11px] font-bold transition flex items-center space-x-1"
+                  >
+                    <Volume2 className="w-3 h-3 text-purple-400" />
+                    <span>Test Voice</span>
+                  </button>
+                </div>
+                <input
+                  type="text"
+                  value={customWelcomeMsg}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setCustomWelcomeMsg(val);
+                    saveWelcomeMessage(val);
+                  }}
+                  placeholder="Welcome. Please fasten your seat belt. Have a safe journey."
+                  className="w-full px-3 py-2 rounded-xl bg-slate-900 border border-slate-800 text-white font-medium text-xs focus:outline-none focus:border-purple-500 transition"
+                />
+              </div>
+
               {/* Account Status */}
               <div className="p-3 bg-slate-950 border border-slate-800 rounded-2xl space-y-1">
                 <div className="flex items-center justify-between">
@@ -2202,6 +2405,8 @@ export default function App() {
         onTripCreated={(newTrip) => {
           setTripAccessOtp(newTrip.tripAccessOtp);
         }}
+        initialBypass={adminBypassActive}
+        onLaunchDemoTrip={handleLaunchDemoTrip}
       />
 
       {/* SECRET BRAND ACTIVATION SECURITY PIN MODAL (5-Tap Trigger, PIN: 140423) */}
@@ -2223,7 +2428,7 @@ export default function App() {
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Enter the 6-digit administrator security PIN to access the Device Activation Key Console.
+              Enter the 6-digit administrator security PIN (<code className="text-amber-400 font-mono font-bold">140423</code>) to bypass login and enter Master Admin Panel &amp; SQL Settings.
             </p>
 
             {secretPinError && (
