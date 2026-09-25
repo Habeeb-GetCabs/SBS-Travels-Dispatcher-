@@ -11,6 +11,8 @@ jobs:
   build-apk:
     name: Build SBS Travels Android APK
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -57,3 +59,25 @@ jobs:
           name: sbs-travels-debug-apk
           path: ./android/app/build/outputs/apk/debug/*.apk
           retention-days: 14
+
+      - name: Publish Direct Downloadable APK to GitHub Release
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.0-debug
+          name: "SBS Travels Driver App (Corrected Debug APK)"
+          body: |
+            ### SBS Travels Driver App - Corrected Debug APK
+            - **Target Device:** Motorola Edge 50 Pro (Android 16 compatible)
+            - **Fixes included:**
+              - Clean monochrome vector icon `ic_notification` (prevents SystemUI freeze)
+              - Service configured with `START_NOT_STICKY`
+              - Safe null-intent check with immediate shutdown
+              - WakeLock only active during trip meter run (removed from `onCreate`)
+              - Runtime foreground service location permissions gate
+            - **Direct Download:** Download `app-debug.apk` directly below (no zip extraction needed).
+          draft: false
+          prerelease: false
+          files: ./android/app/build/outputs/apk/debug/app-debug.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
