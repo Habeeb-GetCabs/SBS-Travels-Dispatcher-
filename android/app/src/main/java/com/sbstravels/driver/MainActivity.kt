@@ -1,5 +1,6 @@
 package com.sbstravels.driver
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -10,6 +11,7 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.webkit.CookieManager
 import android.webkit.GeolocationPermissions
 import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
@@ -36,8 +38,8 @@ class MainActivity : AppCompatActivity() {
         createNotificationChannels()
         requestAppPermissions()
 
-        // Load production or local host URL
-        val targetUrl = "https://ais-dev-5ck7cmqnb5iqboanlakexu-1063211486846.asia-southeast1.run.app"
+        // Load production/shared app URL (no dev session cookie barrier)
+        val targetUrl = "https://ais-pre-5ck7cmqnb5iqboanlakexu-1063211486846.asia-southeast1.run.app"
         webView.loadUrl(targetUrl)
     }
 
@@ -50,6 +52,10 @@ class MainActivity : AppCompatActivity() {
         settings.setGeolocationEnabled(true)
         settings.cacheMode = WebSettings.LOAD_DEFAULT
         settings.allowFileAccess = true
+
+        val cookieManager = CookieManager.getInstance()
+        cookieManager.setAcceptCookie(true)
+        cookieManager.setAcceptThirdPartyCookies(webView, true)
 
         // Register Native Android Meter Bridge for Foreground GPS Service
         webView.addJavascriptInterface(AndroidMeterBridge(this), "AndroidMeterBridge")
@@ -91,24 +97,48 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun startForegroundMeter(tripNumber: String, customerName: String) {
+            val hasFineLocation = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_FINE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+            val hasCoarseLocation = ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            ) == PackageManager.PERMISSION_GRANTED
+
+            if (!hasFineLocation && !hasCoarseLocation) {
+                context.runOnUiThread {
+                    context.requestAppPermissions()
+                }
+                return
+            }
+
             val serviceIntent = Intent(context, MeterForegroundService::class.java).apply {
                 action = MeterForegroundService.ACTION_START_METER
                 putExtra(MeterForegroundService.EXTRA_TRIP_NUMBER, tripNumber)
                 putExtra(MeterForegroundService.EXTRA_CUSTOMER_NAME, customerName)
             }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(serviceIntent)
-            } else {
-                context.startService(serviceIntent)
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    context.startForegroundService(serviceIntent)
+                } else {
+                    context.startService(serviceIntent)
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
         }
 
         @JavascriptInterface
         fun stopForegroundMeter() {
-            val serviceIntent = Intent(context, MeterForegroundService::class.java).apply {
-                action = MeterForegroundService.ACTION_STOP_METER
+            try {
+                val serviceIntent = Intent(context, MeterForegroundService::class.java).apply {
+                    action = MeterForegroundService.ACTION_STOP_METER
+                }
+                context.startService(serviceIntent)
+            } catch (e: Exception) {
+                e.printStackTrace()
             }
-            context.startService(serviceIntent)
         }
 
         @JavascriptInterface
@@ -127,10 +157,12 @@ class MainActivity : AppCompatActivity() {
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
             )
 
+            // CRITICAL FIX: Use clean flat monochrome vector icon R.drawable.ic_notification
+            // DO NOT use R.mipmap.ic_launcher (AdaptiveIconDrawable) which crashes SystemUI
             val notification = NotificationCompat.Builder(context, validChannelId)
                 .setContentTitle(title)
                 .setContentText(message)
-                .setSmallIcon(R.mipmap.ic_launcher)
+                .setSmallIcon(R.drawable.ic_notification)
                 .setAutoCancel(true)
                 .setContentIntent(pendingIntent)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -181,14 +213,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun requestAppPermissions() {
+    fun requestAppPermissions() {
         val permissionsList = mutableListOf(
-            android.Manifest.permission.ACCESS_FINE_LOCATION,
-            android.Manifest.permission.ACCESS_COARSE_LOCATION
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         )
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            permissionsList.add(android.Manifest.permission.POST_NOTIFICATIONS)
+            permissionsList.add(Manifest.permission.POST_NOTIFICATIONS)
         }
 
         val neededPermissions = permissionsList.filter {

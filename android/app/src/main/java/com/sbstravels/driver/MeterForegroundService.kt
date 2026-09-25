@@ -1,5 +1,6 @@
 package com.sbstravels.driver
 
+import android.Manifest
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -7,11 +8,13 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
 import androidx.core.app.NotificationCompat
+import androidx.core.content.ContextCompat
 
 class MeterForegroundService : Service() {
 
@@ -31,11 +34,18 @@ class MeterForegroundService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        acquireWakeLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val action = intent?.action ?: return START_NOT_STICKY
+        if (intent == null) {
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        val action = intent.action ?: run {
+            stopSelf()
+            return START_NOT_STICKY
+        }
 
         when (action) {
             ACTION_START_METER -> {
@@ -46,12 +56,17 @@ class MeterForegroundService : Service() {
             ACTION_STOP_METER -> {
                 stopForegroundService()
             }
+            else -> {
+                stopSelf()
+            }
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startForegroundWithNotification(tripNumber: String, customerName: String) {
+        acquireWakeLock()
+
         val notificationIntent = Intent(this, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -65,21 +80,39 @@ class MeterForegroundService : Service() {
         val notification: Notification = NotificationCompat.Builder(this, NOTIFICATION_CHANNEL_ID)
             .setContentTitle("SBS Travels • $tripNumber Active")
             .setContentText("Meter in progress for $customerName. Tracking trip GPS.")
-            .setSmallIcon(R.mipmap.ic_launcher)
+            .setSmallIcon(R.drawable.ic_notification)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .build()
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            startForeground(
-                NOTIFICATION_ID,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
-            )
-        } else {
-            startForeground(NOTIFICATION_ID, notification)
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val hasFineLocation = ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_FINE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+                val hasCoarseLocation = ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.ACCESS_COARSE_LOCATION
+                ) == PackageManager.PERMISSION_GRANTED
+
+                if (hasFineLocation || hasCoarseLocation) {
+                    startForeground(
+                        NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+                    )
+                } else {
+                    // Fallback to avoid SecurityException on Android 14+ if permission was revoked
+                    startForeground(NOTIFICATION_ID, notification)
+                }
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
     }
 
@@ -111,12 +144,15 @@ class MeterForegroundService : Service() {
 
     private fun acquireWakeLock() {
         try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
-            wakeLock = powerManager?.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "SBSTravels:MeterServiceWakeLock"
-            )?.apply {
-                acquire(12 * 60 * 60 * 1000L) // 12 hours max
+            if (wakeLock == null) {
+                val powerManager = getSystemService(Context.POWER_SERVICE) as? PowerManager
+                wakeLock = powerManager?.newWakeLock(
+                    PowerManager.PARTIAL_WAKE_LOCK,
+                    "SBSTravels:MeterServiceWakeLock"
+                )?.apply {
+                    setReferenceCounted(false)
+                    acquire(4 * 60 * 60 * 1000L) // 4 hours maximum safety timeout
+                }
             }
         } catch (e: Exception) {
             // Ignored
