@@ -416,7 +416,8 @@ export const AdminDispatchModal: React.FC<Props> = ({
 
   const handleBypassPinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (bypassPinInput.trim() === '140423') {
+    const pin = bypassPinInput.trim();
+    if (pin === '2481' || pin === '140423') {
       setAdminProfile(MASTER_ADMIN_BYPASS_PROFILE);
       setBypassError(null);
       setTrips(getLocalTrips());
@@ -427,7 +428,7 @@ export const AdminDispatchModal: React.FC<Props> = ({
         if (list) setFleetDrivers(list);
       });
     } else {
-      setBypassError('Invalid PIN. Master Access Denied.');
+      setBypassError('Invalid Password. Access Denied.');
     }
   };
 
@@ -878,14 +879,14 @@ export const AdminDispatchModal: React.FC<Props> = ({
                 </button>
               </form>
 
-              {/* Security Master PIN 140423 Bypass Form */}
+              {/* Security Master PIN / Dispatcher Password Bypass Form */}
               <div className="pt-3.5 border-t border-slate-800 space-y-2">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-bold text-amber-400 flex items-center space-x-1">
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Instant Master PIN Access</span>
+                    <span>Instant Dispatcher Access</span>
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono">PIN: 140423</span>
+                  <span className="text-[10px] text-slate-400 font-mono">Password: 2481</span>
                 </div>
                 {bypassError && (
                   <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px]">
@@ -900,7 +901,7 @@ export const AdminDispatchModal: React.FC<Props> = ({
                       setBypassPinInput(e.target.value);
                       setBypassError(null);
                     }}
-                    placeholder="Enter Security PIN (140423)"
+                    placeholder="Enter Password (2481)"
                     className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-amber-400"
                   />
                   <button

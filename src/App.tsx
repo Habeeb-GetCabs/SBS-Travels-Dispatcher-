@@ -99,6 +99,10 @@ import {
   MessageSquare,
   Shield,
   Send,
+  ChevronDown,
+  BarChart3,
+  Navigation,
+  Clock,
 } from 'lucide-react';
 
 export default function App() {
@@ -113,7 +117,7 @@ export default function App() {
 
   // Phase 2.4 Device ID & No-Password Driver Onboarding States
   const [showDriverOnboardModal, setShowDriverOnboardModal] = useState<boolean>(false);
-  const [onboardTab, setOnboardTab] = useState<'signup' | 'activate'>('signup');
+  const [onboardTab, setOnboardTab] = useState<'signup' | 'permissions' | 'activate'>('signup');
   const [signupName, setSignupName] = useState<string>('');
   const [signupMobile, setSignupMobile] = useState<string>('');
   const [signupVehNo, setSignupVehNo] = useState<string>('');
@@ -123,6 +127,12 @@ export default function App() {
   const [isSubmittingSignup, setIsSubmittingSignup] = useState<boolean>(false);
   const [signupError, setSignupError] = useState<string | null>(null);
   const [signupSuccess, setSignupSuccess] = useState<string | null>(null);
+
+  // Mandatory Background Permissions State
+  const [locationGranted, setLocationGranted] = useState<boolean>(false);
+  const [notificationGranted, setNotificationGranted] = useState<boolean>(
+    typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted'
+  );
 
   // Activation Code Verification
   const [inputActivationCode, setInputActivationCode] = useState<string>('');
@@ -140,6 +150,29 @@ export default function App() {
   // Driver Edit Modal extra fields
   const [editHomeLocation, setEditHomeLocation] = useState<string>(driver.homeLocation || '');
   const [editPhotoUrl, setEditPhotoUrl] = useState<string>(driver.photoUrl || '');
+
+  // Dispatcher Access Password Protection (Password: 2481)
+  const [showDispatchPinModal, setShowDispatchPinModal] = useState<boolean>(false);
+  const [dispatchPinInput, setDispatchPinInput] = useState<string>('');
+  const [dispatchPinError, setDispatchPinError] = useState<string | null>(null);
+
+  const handleOpenDispatchConsole = () => {
+    setShowDispatchPinModal(true);
+    setDispatchPinInput('');
+    setDispatchPinError(null);
+  };
+
+  const handleDispatchPinSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const pin = dispatchPinInput.trim();
+    if (pin === '2481' || pin === '140423') {
+      setShowDispatchPinModal(false);
+      setAdminBypassActive(true);
+      setShowDispatchModal(true);
+    } else {
+      setDispatchPinError('Invalid Dispatcher Password. Access Denied.');
+    }
+  };
 
   // Secret 5-tap Brand Activation Access (PIN: 140423)
   const [brandTapCount, setBrandTapCount] = useState<number>(0);
@@ -374,9 +407,9 @@ export default function App() {
         setDriver(res.driver);
         saveDriverProfile(res.driver);
         setSignupSuccess(
-          `Registered successfully as ${res.driver.driverCode}! Please share your Device ID with Dispatch to get your Activation Code.`
+          `Profile saved as ${res.driver.driverCode}! Next, enable mandatory background permissions.`
         );
-        setOnboardTab('activate');
+        setOnboardTab('permissions');
       } else {
         setSignupError(res.error || 'Failed to submit driver registration.');
       }
@@ -439,6 +472,11 @@ export default function App() {
 
   // Active Trip Recovery on startup, Driver Session verification, & Realtime Listener (Sections 33, 36)
   useEffect(() => {
+    // Mandatorily open onboarding & activation wizard if driver is not activated
+    if (driver.activationStatus !== 'ACTIVE') {
+      setShowDriverOnboardModal(true);
+    }
+
     const recovered = getActiveTrip();
     if (recovered) {
       setActiveTripState(recovered);
@@ -678,34 +716,36 @@ export default function App() {
   return (
     <div className="min-h-screen bg-[#0b1329] text-slate-100 flex flex-col font-sans select-none antialiased">
       {/* Top App Header */}
-      <header className="bg-[#111c38]/90 border-b border-slate-800/80 px-4 py-3 sticky top-0 z-30 backdrop-blur-md shadow-md">
+      <header className="bg-[#0b1329]/95 border-b border-slate-800/80 px-4 py-3 sticky top-0 z-30 backdrop-blur-md shadow-md">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <button
               type="button"
               onClick={() => setShowHamburgerMenu(true)}
-              className="w-9 h-9 rounded-xl bg-slate-800/80 hover:bg-slate-700/80 text-sky-400 flex items-center justify-center transition border border-slate-700/60 active:scale-95 shadow-sm"
+              className="w-10 h-10 rounded-2xl bg-slate-900 border border-slate-800 hover:bg-slate-800 text-white flex items-center justify-center transition active:scale-95 shadow-md"
               aria-label="Open Navigation Menu"
             >
-              <Menu className="w-5 h-5 text-sky-400" />
+              <Menu className="w-5 h-5 text-white" />
             </button>
             <div onClick={handleBrandTap} className="cursor-pointer select-none active:scale-95 transition">
-              <h1 className="text-lg font-black tracking-tight text-white leading-tight">
-                SBS Travels
+              <h1 className="text-xl font-extrabold tracking-wider leading-none">
+                <span className="text-red-500 font-extrabold">SBS</span>{' '}
+                <span className="text-white font-extrabold">TRAVELS</span>
               </h1>
-              <p className="text-[10px] tracking-wider text-sky-400 font-extrabold uppercase">
-                Driver Application
+              <p className="text-[9px] tracking-[0.2em] text-slate-400 font-bold uppercase mt-0.5">
+                DRIVER APPLICATION
               </p>
             </div>
           </div>
 
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => setShowDispatchModal(true)}
-              className="px-3 py-1 rounded-full text-xs font-bold bg-sky-950/80 hover:bg-sky-900 border border-sky-500/40 text-sky-300 transition flex items-center space-x-1.5 shadow-sm"
+              type="button"
+              onClick={handleOpenDispatchConsole}
+              className="px-3.5 py-1.5 rounded-full text-xs font-bold bg-red-950/80 hover:bg-red-900 border border-red-500/70 text-white transition flex items-center space-x-1.5 shadow-[0_0_15px_rgba(239,68,68,0.35)]"
               title="Admin Dispatcher"
             >
-              <Radio className="w-3.5 h-3.5 text-sky-400 animate-pulse" />
+              <Radio className="w-3.5 h-3.5 text-red-400 animate-pulse" />
               <span>Dispatch</span>
             </button>
           </div>
@@ -898,7 +938,7 @@ export default function App() {
                 </button>
 
                 <button
-                  onClick={() => { setShowDispatchModal(true); setShowHamburgerMenu(false); }}
+                  onClick={() => { handleOpenDispatchConsole(); setShowHamburgerMenu(false); }}
                   className="w-full flex items-center space-x-3 px-3.5 py-2.5 rounded-xl hover:bg-slate-800/60 text-slate-300 transition"
                 >
                   <Radio className="w-4 h-4 text-sky-400" />
@@ -986,70 +1026,84 @@ export default function App() {
               </div>
             )}
 
-            {/* 1. CLEAN DRIVER PROFILE & DUTY TOGGLE (Optimized for aged driver readability) */}
-            <div className="bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#1e293b] border border-slate-700/60 rounded-3xl p-5 shadow-xl space-y-4">
+            {/* 1. DRIVER PROFILE & DUTY TOGGLE CARD */}
+            <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-slate-800 rounded-3xl p-4 shadow-xl space-y-4">
               <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center space-x-4 min-w-0">
-                  {/* Photo Avatar */}
-                  {driver.photoUrl ? (
-                    <img
-                      src={driver.photoUrl}
-                      alt={driver.name}
-                      className="w-16 h-16 rounded-2xl object-cover border-2 border-sky-400/50 shadow-md shrink-0"
-                    />
-                  ) : (
-                    <div className="w-16 h-16 rounded-2xl bg-sky-500/20 border-2 border-sky-400/40 text-sky-300 flex items-center justify-center font-black text-2xl shrink-0 shadow-inner">
-                      {driver.name.charAt(0)}
-                    </div>
-                  )}
+                <div className="flex items-center space-x-3.5 min-w-0">
+                  {/* Photo Avatar with Online Badge */}
+                  <div className="relative shrink-0">
+                    {driver.photoUrl ? (
+                      <img
+                        src={driver.photoUrl}
+                        alt={driver.name}
+                        className="w-14 h-14 rounded-full object-cover border-2 border-slate-700 shadow-md"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-full bg-slate-800 border-2 border-slate-700 flex items-center justify-center font-extrabold text-2xl text-white shadow-inner">
+                        {driver.name.charAt(0)}
+                      </div>
+                    )}
+                    <span className={`w-3.5 h-3.5 rounded-full border-2 border-slate-900 absolute bottom-0 right-0 ${
+                      driver.operationalStatus === 'READY' ? 'bg-emerald-400' : 'bg-amber-400'
+                    }`} />
+                  </div>
 
                   <div className="min-w-0">
-                    <h2 className="text-2xl font-black text-white tracking-tight leading-tight truncate">
-                      {driver.name}
+                    <h2 className="text-lg font-black text-white tracking-tight truncate">
+                      {driver.name} <span className="text-slate-400 font-bold text-sm">(Driver)</span>
                     </h2>
                     <div className="flex items-center space-x-2 mt-1">
-                      <span className="bg-slate-900 text-sky-400 border border-slate-700 px-2.5 py-0.5 rounded-md text-xs font-mono font-bold tracking-wider">
+                      <span className="bg-slate-800/90 text-slate-300 px-2.5 py-0.5 rounded-full text-xs font-mono font-bold border border-slate-700/60">
                         {driver.vehicleNumber}
                       </span>
                       <button
                         type="button"
-                        onClick={() => { setShowDriverEditModal(true); }}
-                        className="text-xs text-sky-400 hover:text-sky-300 font-bold underline"
+                        onClick={() => setShowDriverEditModal(true)}
+                        className="bg-slate-800/90 hover:bg-slate-700 text-slate-300 px-2.5 py-0.5 rounded-full text-xs font-bold border border-slate-700/60 transition flex items-center space-x-1"
                       >
-                        Profile
+                        <span>Profile</span>
+                        <ChevronRight className="w-3 h-3 text-slate-400" />
                       </button>
                     </div>
                   </div>
                 </div>
 
-                <div className="text-right shrink-0">
-                  <div className={`px-3 py-1.5 rounded-full text-xs font-black border flex items-center space-x-1.5 ${
-                    driver.operationalStatus === 'READY'
-                      ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
-                      : 'bg-amber-500/15 border-amber-500/40 text-amber-400'
-                  }`}>
-                    <span className={`w-2.5 h-2.5 rounded-full ${driver.operationalStatus === 'READY' ? 'bg-emerald-400 animate-ping' : 'bg-amber-400'}`} />
+                <div className="shrink-0">
+                  <button
+                    type="button"
+                    onClick={handleToggleShiftStatus}
+                    className={`px-3.5 py-1.5 rounded-full text-xs font-black border flex items-center space-x-1.5 shadow-sm transition ${
+                      driver.operationalStatus === 'READY'
+                        ? 'bg-emerald-950/90 text-emerald-400 border-emerald-500/60'
+                        : 'bg-amber-950/90 text-amber-300 border-amber-500/60'
+                    }`}
+                  >
+                    <span className={`w-2 h-2 rounded-full ${driver.operationalStatus === 'READY' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
                     <span>{driver.operationalStatus === 'READY' ? 'ONLINE' : 'OFFLINE'}</span>
-                  </div>
+                    <ChevronDown className="w-3 h-3 ml-0.5 text-slate-400" />
+                  </button>
                 </div>
               </div>
 
-              {/* Big Duty Status Switch Toggle Button */}
+              {/* Big Red Duty Action Button */}
               <button
                 type="button"
                 onClick={handleToggleShiftStatus}
-                className={`w-full py-4 px-6 rounded-2xl text-lg font-black tracking-wide transition shadow-xl active:scale-98 flex items-center justify-center space-x-3 ${
+                className={`w-full py-3.5 px-5 rounded-2xl text-sm font-extrabold uppercase tracking-wider transition shadow-xl active:scale-98 flex items-center justify-between ${
                   driver.operationalStatus === 'READY'
-                    ? 'bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-600 hover:from-amber-500 hover:to-yellow-500 text-slate-950 border border-amber-300'
-                    : 'bg-gradient-to-r from-emerald-600 via-emerald-500 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/40'
+                    ? 'bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-500 hover:to-rose-500 text-white shadow-[0_4px_20px_rgba(225,29,72,0.4)]'
+                    : 'bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white shadow-[0_4px_20px_rgba(16,185,129,0.4)]'
                 }`}
               >
-                <Car className="w-6 h-6" />
-                <span>{driver.operationalStatus === 'READY' ? 'GO OFFLINE (LOG OFF)' : 'GO ONLINE (START SHIFT)'}</span>
+                <div className="flex items-center space-x-2">
+                  <Car className="w-5 h-5 text-white" />
+                  <span>{driver.operationalStatus === 'READY' ? 'GO OFFLINE (LOG OFF)' : 'GO ONLINE (START SHIFT)'}</span>
+                </div>
+                <ChevronRight className="w-5 h-5 text-white/80" />
               </button>
             </div>
 
-            {/* LIVE TRIP BROADCAST ALERT CARD (Blinking, Pulsing Beacon, Audio Alert, Instant Claim) */}
+            {/* LIVE TRIP BROADCAST ALERT CARD */}
             {openTripsList.length > 0 && (
               <div className="relative overflow-hidden rounded-3xl border-2 border-amber-400 bg-gradient-to-br from-amber-950/70 via-slate-900 to-amber-950/50 p-4 shadow-[0_0_35px_rgba(251,191,36,0.45)] animate-[pulse_1.8s_cubic-bezier(0.4,0,0.6,1)_infinite] space-y-3">
                 <div className="flex items-center justify-between pb-2 border-b border-amber-500/30">
@@ -1182,40 +1236,48 @@ export default function App() {
               </div>
             )}
 
-            {/* 2. TODAY'S SUMMARY (4 Metric Cards) */}
-            <div className="bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#1e293b] border border-slate-700/60 rounded-2xl p-3.5 shadow-lg space-y-2">
+            {/* 2. TODAY'S SHIFT SUMMARY CARD */}
+            <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-4 shadow-lg space-y-3">
               <div className="flex items-center justify-between">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                  Today's Shift Summary
+                <span className="text-xs font-extrabold text-slate-300 uppercase tracking-wider flex items-center space-x-2">
+                  <BarChart3 className="w-4 h-4 text-slate-400" />
+                  <span>TODAY'S SHIFT SUMMARY</span>
                 </span>
-                <span className="text-xs font-bold text-emerald-400">
-                  {shiftMetrics.totalTripsToday} {shiftMetrics.totalTripsToday === 1 ? 'Trip' : 'Trips'}
+                <span className="text-xs text-slate-400 font-medium font-mono">
+                  {new Date().toLocaleDateString('en-GB', { weekday: 'short', day: '2-digit', month: 'short', year: 'numeric' })}
                 </span>
               </div>
 
-              <div className="grid grid-cols-4 gap-1.5 text-center pt-0.5">
-                <div className="bg-slate-900/90 p-2 rounded-xl border border-emerald-500/20">
-                  <span className="text-[9px] text-emerald-400/80 block uppercase font-bold">Revenue</span>
-                  <p className="text-sm font-black font-mono text-emerald-400">
+              <div className="grid grid-cols-4 gap-2 text-center">
+                <div className="bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800 flex flex-col items-center justify-center space-y-1">
+                  <span className="text-red-500 font-black text-sm">₹</span>
+                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider">REVENUE</span>
+                  <p className="text-sm font-black font-mono text-white">
                     ₹{shiftMetrics.totalEarningsToday}
                   </p>
                 </div>
-                <div className="bg-slate-900/90 p-2 rounded-xl border border-cyan-500/20">
-                  <span className="text-[9px] text-cyan-400/80 block uppercase font-bold">Trips</span>
-                  <p className="text-sm font-black font-mono text-cyan-400">
+
+                <div className="bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800 flex flex-col items-center justify-center space-y-1">
+                  <Car className="w-4 h-4 text-white" />
+                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider">TRIPS</span>
+                  <p className="text-sm font-black font-mono text-white">
                     {shiftMetrics.totalTripsToday}
                   </p>
                 </div>
-                <div className="bg-slate-900/90 p-2 rounded-xl border border-sky-500/20">
-                  <span className="text-[9px] text-sky-400/80 block uppercase font-bold">Distance</span>
-                  <p className="text-sm font-black font-mono text-sky-400">
-                    {shiftMetrics.totalDistanceKmToday} <span className="text-[9px] text-slate-400">km</span>
+
+                <div className="bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800 flex flex-col items-center justify-center space-y-1">
+                  <Navigation className="w-4 h-4 text-white" />
+                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider">DISTANCE</span>
+                  <p className="text-sm font-black font-mono text-white">
+                    {shiftMetrics.totalDistanceKmToday} <span className="text-[10px] text-slate-400 font-normal">km</span>
                   </p>
                 </div>
-                <div className="bg-slate-900/90 p-2 rounded-xl border border-violet-500/20">
-                  <span className="text-[9px] text-violet-400/80 block uppercase font-bold">Time</span>
-                  <p className="text-sm font-black font-mono text-violet-400">
-                    {shiftMetrics.totalDurationMinutesToday} <span className="text-[9px] text-slate-400">m</span>
+
+                <div className="bg-slate-950/80 p-2.5 rounded-2xl border border-slate-800 flex flex-col items-center justify-center space-y-1">
+                  <Clock className="w-4 h-4 text-white" />
+                  <span className="text-[9px] text-slate-400 font-extrabold uppercase tracking-wider">TIME</span>
+                  <p className="text-sm font-black font-mono text-white">
+                    {shiftMetrics.totalDurationMinutesToday} <span className="text-[10px] text-slate-400 font-normal">m</span>
                   </p>
                 </div>
               </div>
@@ -1244,55 +1306,84 @@ export default function App() {
               </div>
             )}
 
-            {/* Device Activation Warning if not ACTIVE */}
-            {driver.activationStatus !== 'ACTIVE' && (
-              <div className="bg-amber-950/60 border border-amber-700/60 rounded-2xl p-3.5 flex items-center justify-between text-amber-200 text-xs">
-                <div className="flex items-center space-x-3">
-                  <ShieldAlert className="w-5 h-5 text-amber-400 shrink-0" />
-                  <div>
-                    <p className="font-bold text-white">Device Not Activated ({driver.activationStatus})</p>
-                    <p className="text-[11px] text-amber-300/80">
-                      Share your Device ID with Dispatch to get your 6-digit Activation Code.
-                    </p>
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setOnboardTab('activate');
-                    setShowDriverOnboardModal(true);
-                  }}
-                  className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold rounded-xl text-xs shrink-0 ml-2"
-                >
-                  Activate
-                </button>
-              </div>
-            )}
+            {/* 3. GET TRIP (PRIMARY OPERATIONAL HERO CARD WITH 6-DIGIT OTP) */}
+            <div className="bg-gradient-to-b from-slate-900/90 via-slate-950 to-slate-900 border border-slate-800 rounded-3xl p-5 text-center shadow-2xl space-y-3 relative overflow-hidden">
+              {/* Background trace styling */}
+              <div className="absolute top-0 left-0 w-32 h-32 bg-red-500/5 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute bottom-0 right-0 w-32 h-32 bg-rose-500/5 rounded-full blur-2xl pointer-events-none" />
 
-            {/* 3. GET TRIP (PRIMARY OPERATIONAL ACTION CARD) */}
-            <div className="bg-gradient-to-br from-[#1e293b] via-[#0f172a] to-[#131f37] border-2 border-sky-500/40 rounded-3xl p-6 text-center shadow-xl space-y-3">
-              <div className="w-14 h-14 rounded-2xl bg-sky-500/10 border border-sky-500/30 text-sky-400 flex items-center justify-center mx-auto mb-1 shadow-md">
-                <Radio className="w-7 h-7 text-sky-400 animate-pulse" />
+              <div className="w-16 h-16 rounded-full bg-gradient-to-b from-red-500 to-rose-700 shadow-[0_0_25px_rgba(239,68,68,0.6)] border-2 border-red-400/50 flex items-center justify-center text-white mx-auto my-1">
+                <Radio className="w-8 h-8 text-white animate-pulse" />
               </div>
-              <h3 className="text-lg font-black text-white tracking-wide">GET TRIP</h3>
-              <p className="text-xs text-slate-300 max-w-xs mx-auto leading-relaxed font-medium">
+
+              <h3 className="text-xl font-black text-white tracking-widest uppercase">GET TRIP</h3>
+              <p className="text-xs text-slate-400 max-w-xs mx-auto leading-relaxed">
                 Enter your 6-digit Trip Access OTP provided by dispatch to claim and execute your trip.
               </p>
 
-              <div className="pt-2">
+              {/* 6 OTP Digit Input Boxes */}
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (tripAccessOtp.length >= 4) {
+                    setLoadTripModal(true);
+                  }
+                }}
+                className="space-y-3 pt-1"
+              >
+                <div className="grid grid-cols-6 gap-2 max-w-xs mx-auto my-2">
+                  {[0, 1, 2, 3, 4, 5].map((idx) => (
+                    <input
+                      key={idx}
+                      type="text"
+                      maxLength={1}
+                      value={tripAccessOtp[idx] || ''}
+                      onChange={(e) => {
+                        const val = e.target.value.replace(/\D/g, '');
+                        if (val) {
+                          const current = tripAccessOtp.split('');
+                          current[idx] = val;
+                          const newOtp = current.join('');
+                          setTripAccessOtp(newOtp);
+                          // Auto focus next field
+                          const nextInput = document.getElementById(`otp-input-${idx + 1}`);
+                          if (nextInput) (nextInput as HTMLInputElement).focus();
+                        } else {
+                          const current = tripAccessOtp.split('');
+                          current[idx] = '';
+                          setTripAccessOtp(current.join(''));
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Backspace' && !tripAccessOtp[idx] && idx > 0) {
+                          const prevInput = document.getElementById(`otp-input-${idx - 1}`);
+                          if (prevInput) (prevInput as HTMLInputElement).focus();
+                        }
+                      }}
+                      id={`otp-input-${idx}`}
+                      placeholder="-"
+                      className="w-11 h-12 rounded-xl bg-slate-950 border border-slate-700/80 text-white font-mono text-xl font-extrabold text-center focus:border-red-500 focus:outline-none transition shadow-inner"
+                    />
+                  ))}
+                </div>
+
                 <button
+                  type="button"
                   onClick={() => {
                     setTripAccessOtp('');
                     setClaimError(null);
                     setLoadTripModal(true);
                   }}
-                  className="w-full py-4 px-6 rounded-2xl font-black text-base tracking-wider shadow-lg active:scale-[0.98] transition flex items-center justify-center space-x-2 bg-gradient-to-r from-sky-600 via-blue-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white shadow-sky-600/30"
+                  className="w-full py-3.5 px-6 rounded-2xl font-black text-sm uppercase tracking-wider shadow-[0_6px_25px_rgba(225,29,72,0.45)] active:scale-[0.98] transition flex items-center justify-center space-x-2 bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-500 hover:to-rose-500 text-white"
                 >
-                  <Key className="w-5 h-5" />
+                  <Key className="w-4 h-4 text-white" />
                   <span>GET TRIP</span>
+                  <ChevronRight className="w-4 h-4 text-white" />
                 </button>
-              </div>
+              </form>
             </div>
+
+
           </div>
         )}
 
@@ -1616,33 +1707,16 @@ export default function App() {
               </div>
             </div>
 
-            {/* About Us Footer Branding */}
-            <div className="pt-4 pb-2 text-center space-y-1">
-              <h4 className="text-lg font-black tracking-tight text-white uppercase">
-                SBS Travels
-              </h4>
-              <p className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-                Powered by
-              </p>
-              <div className="pt-0.5 inline-flex items-center space-x-1.5 px-3.5 py-1.5 bg-slate-950 border border-red-600/80 rounded-xl shadow-lg">
-                <span className="text-red-500 font-black tracking-wider text-xs uppercase">GET TAXI</span>
-                <span className="bg-white text-slate-950 px-1.5 py-0.2 rounded font-black text-[11px] tracking-wide uppercase">BASHEER</span>
-              </div>
-            </div>
+
           </div>
         )}
 
-        {/* Footer Credit with Refined Hierarchy GET TAXI BASHEER Branding */}
-        <footer className="pt-6 pb-4 text-center space-y-1">
-          <h4 className="text-lg font-black tracking-tight text-white uppercase">
-            SBS Travels
-          </h4>
-          <p className="text-[10px] font-bold text-slate-400 tracking-wider uppercase">
-            Powered by
-          </p>
-          <div className="pt-0.5 inline-flex items-center space-x-1.5 px-3.5 py-1.5 bg-slate-950 border border-red-600/80 rounded-xl shadow-lg">
+        {/* Compact Footer Credit - POWERED BY GET TAXI */}
+        <footer className="pt-2 pb-3 text-center">
+          <div className="inline-flex items-center space-x-1.5 px-3 py-1 bg-slate-950/90 border border-red-600/80 rounded-full shadow-md">
+            <span className="text-[9px] font-bold text-slate-400 tracking-wider uppercase">POWERED BY</span>
             <span className="text-red-500 font-black tracking-wider text-xs uppercase">GET TAXI</span>
-            <span className="bg-white text-slate-950 px-1.5 py-0.2 rounded font-black text-[11px] tracking-wide uppercase">BASHEER</span>
+            <span className="bg-white text-slate-950 px-1.5 py-0.5 rounded-full font-black text-[10px] tracking-wide uppercase">BASHEER</span>
           </div>
         </footer>
       </main>
@@ -1927,7 +2001,7 @@ export default function App() {
 
       {/* PHASE 2.4: NO-PASSWORD DRIVER ONBOARDING & DEVICE ID ACTIVATION MODAL */}
       {showDriverOnboardModal && (
-        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+        <div className="fixed inset-0 z-50 bg-slate-950/95 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-[#0f172a] border border-slate-800 w-full max-w-sm rounded-3xl p-5 shadow-2xl space-y-4 animate-in zoom-in-95 duration-150 text-slate-100 max-h-[92vh] overflow-y-auto">
             <div className="flex items-center justify-between border-b border-slate-800 pb-3">
               <div className="flex items-center space-x-2">
@@ -1939,49 +2013,71 @@ export default function App() {
                   <p className="text-[10px] text-sky-400 font-bold uppercase">Device ID Hardware Auth</p>
                 </div>
               </div>
-              <button
-                onClick={() => {
-                  setShowDriverOnboardModal(false);
-                  setSignupError(null);
-                  setSignupSuccess(null);
-                  setActivationError(null);
-                  setActivationSuccess(null);
-                }}
-                className="w-7 h-7 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs font-bold"
-              >
-                ✕
-              </button>
+              {driver.activationStatus === 'ACTIVE' ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDriverOnboardModal(false);
+                    setSignupError(null);
+                    setSignupSuccess(null);
+                    setActivationError(null);
+                    setActivationSuccess(null);
+                  }}
+                  className="w-7 h-7 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs font-bold"
+                  title="Close Onboarding Modal"
+                >
+                  ✕
+                </button>
+              ) : (
+                <span className="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 font-black text-[10px] uppercase border border-amber-500/40">
+                  Mandatory
+                </span>
+              )}
             </div>
 
             {/* Modal Tabs */}
-            <div className="grid grid-cols-2 gap-1.5 p-1 bg-slate-950 rounded-2xl border border-slate-800 text-xs">
+            <div className="grid grid-cols-3 gap-1 p-1 bg-slate-950 rounded-2xl border border-slate-800 text-xs">
               <button
                 type="button"
                 onClick={() => setOnboardTab('signup')}
-                className={`py-2 rounded-xl font-bold transition flex items-center justify-center space-x-1.5 ${
+                className={`py-2 rounded-xl font-bold transition flex items-center justify-center space-x-1 ${
                   onboardTab === 'signup'
                     ? 'bg-sky-600 text-white shadow-md'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                <PlusCircle className="w-3.5 h-3.5" />
-                <span>1. Sign Up</span>
+                <User className="w-3.5 h-3.5" />
+                <span>1. Profile</span>
               </button>
+
+              <button
+                type="button"
+                onClick={() => setOnboardTab('permissions')}
+                className={`py-2 rounded-xl font-bold transition flex items-center justify-center space-x-1 ${
+                  onboardTab === 'permissions'
+                    ? 'bg-sky-600 text-white shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <ShieldCheck className="w-3.5 h-3.5" />
+                <span>2. Permissions</span>
+              </button>
+
               <button
                 type="button"
                 onClick={() => setOnboardTab('activate')}
-                className={`py-2 rounded-xl font-bold transition flex items-center justify-center space-x-1.5 ${
+                className={`py-2 rounded-xl font-bold transition flex items-center justify-center space-x-1 ${
                   onboardTab === 'activate'
                     ? 'bg-sky-600 text-white shadow-md'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
                 <Key className="w-3.5 h-3.5" />
-                <span>2. Activation Code</span>
+                <span>3. Code</span>
               </button>
             </div>
 
-            {/* TAB 1: DRIVER SIGN-UP */}
+            {/* TAB 1: MANDATORY DRIVER PROFILE SETTINGS */}
             {onboardTab === 'signup' && (
               <form onSubmit={handleOnboardingSubmit} className="space-y-3 text-xs">
                 {/* Photo Upload from Gallery (Not Camera forced) */}
@@ -2107,16 +2203,6 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Driver ID auto-generation note */}
-                <div className="p-2.5 rounded-xl bg-slate-900 border border-slate-800 text-[10px] text-slate-400 space-y-1">
-                  <p className="font-bold text-slate-300">
-                    Driver ID is automated starting from <span className="text-sky-400 font-mono">DRV0051</span>.
-                  </p>
-                  <p className="text-[9px] text-slate-400">
-                    IDs 0001 - 0050 are reserved for admin/dispatch. Master Admin can modify this to DRV007 or any ID anytime in the Dispatcher Console.
-                  </p>
-                </div>
-
                 {/* Persistent Device ID Box */}
                 <div className="p-3 rounded-2xl bg-sky-950/40 border border-sky-500/30 space-y-2">
                   <div className="flex items-center justify-between">
@@ -2133,24 +2219,24 @@ export default function App() {
                       className="text-[10px] text-sky-300 hover:text-white font-bold flex items-center space-x-1"
                     >
                       {copiedDeviceId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-                      <span>{copiedDeviceId ? 'Copied' : 'Copy'}</span>
+                      <span>{copiedDeviceId ? 'Copied' : 'Copy Device ID'}</span>
                     </button>
                   </div>
                   <p className="font-mono text-[11px] font-bold text-white bg-slate-950 p-2 rounded-xl border border-slate-800 break-all select-all">
                     {driver.deviceId}
                   </p>
 
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const msg = `SBS Travels Driver: Hello Admin, I am registering as a driver.\nName: ${signupName || driver.name}\nMobile: ${signupMobile || driver.mobile}\nVehicle: ${signupVehNo || driver.vehicleNumber}\nHome: ${signupHomeLocation}\nDevice ID: *${driver.deviceId}*\nPlease generate my 6-digit Activation Code in Dispatch Console.`;
-                      window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, '_blank');
-                    }}
-                    className="w-full py-1.5 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 rounded-xl font-bold text-[11px] flex items-center justify-center space-x-1.5 transition"
+                  <a
+                    href={`https://wa.me/919043743777?text=${encodeURIComponent(
+                      `Hello Admin (SBS Travels), I am registering as a driver.\nName: ${signupName || driver.name}\nMobile: ${signupMobile || driver.mobile}\nVehicle: ${signupVehNo || driver.vehicleNumber}\nHome: ${signupHomeLocation}\nDevice ID: *${driver.deviceId}*\nPlease generate my Activation Code.`
+                    )}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-2 bg-emerald-600/30 hover:bg-emerald-600/50 text-emerald-300 border border-emerald-500/40 rounded-xl font-bold text-[11px] flex items-center justify-center space-x-1.5 transition"
                   >
                     <MessageSquare className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Send Device ID to Admin via WhatsApp</span>
-                  </button>
+                    <span>Send Profile to Admin WhatsApp (9043743777)</span>
+                  </a>
                 </div>
 
                 {signupError && (
@@ -2173,46 +2259,197 @@ export default function App() {
                   {isSubmittingSignup ? (
                     <>
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Submitting Registration...</span>
+                      <span>Saving Profile...</span>
                     </>
                   ) : (
-                    <span>Register Driver &amp; Submit to Dispatch</span>
+                    <span>Save Profile &amp; Next: Permissions ➔</span>
                   )}
                 </button>
-
-                <div className="p-2 rounded-xl bg-slate-950 border border-slate-800 text-[10px] text-slate-400 text-center font-medium">
-                  🔒 No passwords required. Login is securely bound to this Device ID in Supabase.
-                </div>
               </form>
             )}
 
-            {/* TAB 2: DEVICE ACTIVATION CODE */}
+            {/* TAB 2: MANDATORY BACKGROUND PERMISSIONS */}
+            {onboardTab === 'permissions' && (
+              <div className="space-y-3 text-xs">
+                <div className="p-3 rounded-2xl bg-sky-950/40 border border-sky-500/30 space-y-1">
+                  <h4 className="font-bold text-white text-xs flex items-center space-x-1.5">
+                    <ShieldCheck className="w-4 h-4 text-sky-400" />
+                    <span>Mandatory App Permissions</span>
+                  </h4>
+                  <p className="text-[11px] text-slate-300 leading-snug">
+                    Enable background location &amp; sound alarms so the app can receive trip broadcasts and track live fare meter GPS.
+                  </p>
+                </div>
+
+                {/* 1. Allow All The Time Location */}
+                <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white flex items-center space-x-1.5">
+                      <MapPin className="w-4 h-4 text-emerald-400" />
+                      <span>1. Allow All The Time Location Access</span>
+                    </span>
+                    {locationGranted ? (
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-extrabold text-[10px] uppercase">
+                        Granted ✓
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px] uppercase">
+                        Required
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Used for continuous background meter GPS fare calculation and calculating distance to pickup points.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (navigator.geolocation) {
+                        navigator.geolocation.getCurrentPosition(
+                          () => {
+                            setLocationGranted(true);
+                            soundEngine.playClaimSuccess();
+                          },
+                          (err) => {
+                            alert('Location Access: ' + err.message + '. Please set Location permission to "Allow all the time" in app settings.');
+                          },
+                          { enableHighAccuracy: true }
+                        );
+                      }
+                    }}
+                    className={`w-full py-2 rounded-xl font-bold text-xs transition border flex items-center justify-center space-x-1.5 ${
+                      locationGranted
+                        ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
+                        : 'bg-sky-600 hover:bg-sky-500 text-white border-sky-400 shadow-md'
+                    }`}
+                  >
+                    <MapPin className="w-3.5 h-3.5" />
+                    <span>{locationGranted ? 'Location Access Granted ✓' : 'Grant / Test All The Time Location'}</span>
+                  </button>
+                </div>
+
+                {/* 2. Push Notification Permission */}
+                <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white flex items-center space-x-1.5">
+                      <Bell className="w-4 h-4 text-amber-400" />
+                      <span>2. Allow Push &amp; Sound Notifications</span>
+                    </span>
+                    {notificationGranted ? (
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 font-extrabold text-[10px] uppercase">
+                        Granted ✓
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold text-[10px] uppercase">
+                        Required
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-slate-400 leading-relaxed">
+                    Triggers instant audio alarms and notifications when dispatch broadcasts new trip opportunities.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      const granted = await notificationService.requestWebNotificationPermission();
+                      setNotificationGranted(granted);
+                      if (granted) soundEngine.playClaimSuccess();
+                    }}
+                    className={`w-full py-2 rounded-xl font-bold text-xs transition border flex items-center justify-center space-x-1.5 ${
+                      notificationGranted
+                        ? 'bg-emerald-950/60 border-emerald-500/50 text-emerald-300'
+                        : 'bg-amber-600 hover:bg-amber-500 text-white border-amber-400 shadow-md'
+                    }`}
+                  >
+                    <Bell className="w-3.5 h-3.5" />
+                    <span>{notificationGranted ? 'Notification Access Granted ✓' : 'Grant Push Notification Permission'}</span>
+                  </button>
+                </div>
+
+                {/* 3. Audio Chime Test */}
+                <div className="p-3 bg-slate-900 border border-slate-800 rounded-2xl flex items-center justify-between">
+                  <div>
+                    <span className="font-bold text-white block">3. Test Sound &amp; Voice Chimes</span>
+                    <span className="text-[10px] text-slate-400">Welcome voice &amp; trip alarms</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      soundEngine.playClaimSuccess();
+                      soundEngine.speak(customWelcomeMsg);
+                    }}
+                    className="px-3 py-1.5 bg-purple-950 hover:bg-purple-900 text-purple-300 border border-purple-500/40 rounded-xl text-xs font-bold transition flex items-center space-x-1"
+                  >
+                    <Volume2 className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Test Audio</span>
+                  </button>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setOnboardTab('activate')}
+                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-black text-xs uppercase tracking-wider shadow-lg active:scale-[0.98] transition flex items-center justify-center space-x-1.5"
+                >
+                  <span>Next: Activation Code &amp; Device Binding ➔</span>
+                </button>
+              </div>
+            )}
+
+            {/* TAB 3: DEVICE ACTIVATION CODE BLOCK */}
             {onboardTab === 'activate' && (
-              <form onSubmit={handleActivateDeviceSubmit} className="space-y-4 text-xs">
+              <form onSubmit={handleActivateDeviceSubmit} className="space-y-3.5 text-xs">
+                {/* Hardware Device ID Container with Copy Button */}
                 <div className="p-3 rounded-2xl bg-slate-900 border border-slate-800 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-bold text-slate-400 uppercase">
-                      Current Device ID
+                      Hardware Device ID
                     </span>
-                    <span className={`px-2 py-0.5 rounded font-black text-[10px] uppercase ${
-                      driver.activationStatus === 'ACTIVE'
-                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
-                    }`}>
-                      {driver.activationStatus}
-                    </span>
+                    <div className="flex items-center space-x-2">
+                      <span className={`px-2 py-0.5 rounded font-black text-[10px] uppercase ${
+                        driver.activationStatus === 'ACTIVE'
+                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                          : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                      }`}>
+                        {driver.activationStatus}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(driver.deviceId);
+                          setCopiedDeviceId(true);
+                          setTimeout(() => setCopiedDeviceId(false), 2000);
+                        }}
+                        className="text-[10px] text-sky-300 hover:text-white font-bold flex items-center space-x-1"
+                      >
+                        {copiedDeviceId ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                        <span>{copiedDeviceId ? 'Copied' : 'Copy'}</span>
+                      </button>
+                    </div>
                   </div>
                   <p className="font-mono text-[11px] font-bold text-white bg-slate-950 p-2 rounded-xl border border-slate-800 break-all select-all">
                     {driver.deviceId}
                   </p>
                 </div>
 
-                <div className="space-y-1.5 text-center">
+                {/* Direct Admin WhatsApp Button (9043743777) */}
+                <a
+                  href={`https://wa.me/919043743777?text=${encodeURIComponent(
+                    `Hello Admin (9043743777), please generate my Activation Code.\nDriver: ${signupName || driver.name}\nVehicle: ${signupVehNo || driver.vehicleNumber}\nDevice ID: *${driver.deviceId}*`
+                  )}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-black text-xs rounded-2xl shadow-lg transition flex items-center justify-center space-x-2"
+                >
+                  <MessageSquare className="w-4 h-4 text-white animate-bounce" />
+                  <span>💬 Direct WhatsApp to Admin (9043743777)</span>
+                </a>
+
+                <div className="space-y-1.5 text-center pt-1">
                   <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Enter 6-Digit Activation Code
+                    Enter Activation Code
                   </label>
                   <p className="text-[10px] text-slate-400">
-                    Generated by Admin in Dispatch Console specifically for this Device ID.
+                    Enter the code sent by Admin on WhatsApp (9043743777) for this Device ID.
                   </p>
                   <input
                     type="text"
@@ -2408,6 +2645,65 @@ export default function App() {
         initialBypass={adminBypassActive}
         onLaunchDemoTrip={handleLaunchDemoTrip}
       />
+
+      {/* DISPATCHER CONTROL ACCESS PASSWORD MODAL (Password: 2481) */}
+      {showDispatchPinModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
+            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+              <div className="flex items-center space-x-2">
+                <Radio className="w-5 h-5 text-sky-400 animate-pulse" />
+                <h3 className="font-extrabold text-white text-base">Dispatcher Control Verification</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowDispatchPinModal(false)}
+                className="text-slate-400 hover:text-white font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Enter the Dispatcher Control Password (<code className="text-amber-400 font-mono font-bold">2481</code>) to access trip dispatching, tariff configuration, and fleet management.
+            </p>
+
+            {dispatchPinError && (
+              <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold">
+                {dispatchPinError}
+              </div>
+            )}
+
+            <form onSubmit={handleDispatchPinSubmit} className="space-y-4">
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                  Dispatcher Password
+                </label>
+                <input
+                  type="password"
+                  maxLength={10}
+                  autoFocus
+                  value={dispatchPinInput}
+                  onChange={(e) => {
+                    setDispatchPinInput(e.target.value);
+                    setDispatchPinError(null);
+                  }}
+                  placeholder="Enter Password (2481)"
+                  className="w-full py-3 px-4 bg-slate-950 border border-slate-700 rounded-2xl text-white text-center font-mono text-xl tracking-widest focus:outline-none focus:border-sky-400"
+                />
+              </div>
+
+              <button
+                type="submit"
+                className="w-full py-3 bg-gradient-to-r from-sky-600 to-blue-600 hover:from-sky-500 hover:to-blue-500 text-white font-bold text-xs uppercase tracking-wider rounded-2xl transition shadow-lg shadow-sky-600/20 flex items-center justify-center space-x-2"
+              >
+                <Key className="w-4 h-4" />
+                <span>Unlock Dispatcher Console</span>
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
 
       {/* SECRET BRAND ACTIVATION SECURITY PIN MODAL (5-Tap Trigger, PIN: 140423) */}
       {showSecretPinModal && (

@@ -20,7 +20,12 @@ import {
   FlipHorizontal,
   CheckCircle2,
   MapPin,
-  Car
+  Car,
+  User,
+  Coins,
+  Pause,
+  Square,
+  MoreVertical
 } from 'lucide-react';
 import {
   completeTripAtomic,
@@ -74,6 +79,7 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
   // Audio & Layout State
   const [isSoundMuted, setIsSoundMuted] = useState<boolean>(!soundEngine.isEnabled());
   const [isMiniPipMode, setIsMiniPipMode] = useState<boolean>(false);
+  const [isSpeedBubbleMode, setIsSpeedBubbleMode] = useState<boolean>(false);
   const [isHudMode, setIsHudMode] = useState<boolean>(false);
   const [showSosModal, setShowSosModal] = useState<boolean>(false);
 
@@ -234,7 +240,7 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
 
           const fix = gpsEngineRef.current.processRawGps(raw);
 
-          // Update GPS signal status & speed
+          // Update GPS signal status & speed from validated fix
           setGpsStatus(fix.signalState);
           setCurrentSpeedKmh(fix.speedKmh);
 
@@ -245,41 +251,43 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
             lastSpeedAlertRef.current = now;
           }
 
-          // Movement vs Stationary handling
-          if (!fix.isStationary && fix.distanceDeltaKm > 0.005) {
-            setDistanceKm((prev) => {
-              const nextDist = Number((prev + fix.distanceDeltaKm).toFixed(2));
+          // Movement vs Stationary handling for valid GPS fixes
+          if (fix.isValid) {
+            if (!fix.isStationary && fix.distanceDeltaKm > 0) {
+              setDistanceKm((prev) => {
+                const nextDist = Number((prev + fix.distanceDeltaKm).toFixed(2));
 
-              // Milestone Audio Announcements (5, 10, 25, 50, 75, 100 km)
-              const milestones = [5, 10, 25, 50, 75, 100];
-              for (const m of milestones) {
-                if (nextDist >= m && !announcedMilestones.current.has(m)) {
-                  announcedMilestones.current.add(m);
-                  soundEngine.speak(`${m} kilometers completed.`);
+                // Milestone Audio Announcements (5, 10, 25, 50, 75, 100 km)
+                const milestones = [5, 10, 25, 50, 75, 100];
+                for (const m of milestones) {
+                  if (nextDist >= m && !announcedMilestones.current.has(m)) {
+                    announcedMilestones.current.add(m);
+                    soundEngine.speak(`${m} kilometers completed.`);
+                  }
                 }
-              }
 
-              return nextDist;
-            });
-            stationaryTicksRef.current = 0;
-          } else if (fix.isStationary) {
-            // Stationary Waiting Detection
-            stationaryTicksRef.current += 1;
-            if (stationaryTicksRef.current >= 2) {
-              setWaitingSeconds((prev) => {
-                const nextWait = prev + 1;
-                // Grace period notification
-                const graceSecs = (trip.tariffConfig?.waitingGraceMinutes || 15) * 60;
-                if (nextWait >= graceSecs && !hasAnnouncedWaitingThreshold.current) {
-                  hasAnnouncedWaitingThreshold.current = true;
-                  soundEngine.speak('Waiting time has exceeded grace period.');
-                }
-                // Audible cue for every full 5 minutes of waiting
-                if (nextWait > 0 && nextWait % 300 === 0) {
-                  soundEngine.playWaitingBeep();
-                }
-                return nextWait;
+                return nextDist;
               });
+              stationaryTicksRef.current = 0;
+            } else if (fix.isStationary || fix.isWaitingConfirmed) {
+              // Stationary Waiting Detection
+              stationaryTicksRef.current += 1;
+              if (stationaryTicksRef.current >= 2) {
+                setWaitingSeconds((prev) => {
+                  const nextWait = prev + 1;
+                  // Grace period notification
+                  const graceSecs = (trip.tariffConfig?.waitingGraceMinutes || 15) * 60;
+                  if (nextWait >= graceSecs && !hasAnnouncedWaitingThreshold.current) {
+                    hasAnnouncedWaitingThreshold.current = true;
+                    soundEngine.speak('Waiting time has exceeded grace period.');
+                  }
+                  // Audible cue for every full 5 minutes of waiting
+                  if (nextWait > 0 && nextWait % 300 === 0) {
+                    soundEngine.playWaitingBeep();
+                  }
+                  return nextWait;
+                });
+              }
             }
           }
         },
@@ -528,6 +536,44 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
     );
   }
 
+  // FLOATING METER OVERLAY WITH SPEED BUBBLE ONLY (NO FARE DETAILS)
+  if (isSpeedBubbleMode) {
+    return (
+      <div className="fixed top-20 right-4 z-50 animate-in fade-in zoom-in-95">
+        <div
+          onClick={() => setIsSpeedBubbleMode(false)}
+          className="bg-gradient-to-tr from-slate-950 via-slate-900 to-slate-950 border-2 border-emerald-400 rounded-full w-24 h-24 shadow-[0_0_30px_rgba(16,185,129,0.75)] flex flex-col items-center justify-center text-white cursor-pointer select-none active:scale-95 transition-all space-y-0.5 relative group"
+          title="Click to expand full digital meter"
+        >
+          {/* Signal Indicator Dot */}
+          <span
+            className={`w-2.5 h-2.5 rounded-full absolute top-2 right-3 border border-slate-900 ${
+              gpsStatus === 'GOOD' ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'
+            }`}
+          />
+
+          <div className="flex items-center space-x-1 text-emerald-400">
+            <Gauge className="w-3.5 h-3.5 animate-pulse" />
+            <span className="text-[8px] font-black uppercase tracking-wider">SPEED</span>
+          </div>
+
+          <span className="text-3xl font-black font-mono tracking-tight text-white leading-none my-0.5">
+            {currentSpeedKmh}
+          </span>
+
+          <span className="text-[8px] font-black text-emerald-400 uppercase tracking-widest">
+            KM/H
+          </span>
+
+          {/* Quick Helper Label */}
+          <span className="absolute -bottom-6 text-[9px] font-extrabold text-slate-200 bg-slate-900/90 px-2.5 py-0.5 rounded-full border border-slate-700 whitespace-nowrap shadow-md">
+            Tap to Expand Meter
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   // WINDSHIELD HUD MIRROR MODE FOR NIGHT DRIVING
   if (isHudMode) {
     return (
@@ -583,7 +629,7 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
     );
   }
 
-  // STANDARD HIGH-CONTRAST DIGITAL TAXI METER
+  // STANDARD HIGH-CONTRAST DIGITAL TAXI METER (Screenshot 2 Match)
   return (
     <div className="space-y-4 animate-in fade-in duration-200">
       {/* Demo Mode Exit Bar */}
@@ -609,308 +655,268 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
         </div>
       )}
 
-      {/* Top Status & Controls Bar */}
-      <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-3 shadow-sm flex items-center justify-between">
+      {/* Top Status & Battery Bar */}
+      <div className="flex items-center justify-between text-xs px-1">
         <div className="flex items-center space-x-2">
-          <span className="bg-sky-500/10 text-sky-400 border border-sky-500/20 px-2 py-0.5 rounded text-xs font-mono font-bold">
-            {trip.tripNumber}
+          <span className="bg-emerald-950/80 border border-emerald-500/50 text-emerald-400 px-2.5 py-1 rounded-full text-[11px] font-bold flex items-center space-x-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+            <span>GPS {gpsStatus}</span>
           </span>
-          <div className="flex items-center space-x-1.5 bg-slate-950 px-2 py-0.5 rounded-full border border-slate-800 text-[10px] font-mono">
-            <span
-              className={`w-2 h-2 rounded-full ${
-                gpsStatus === 'GOOD'
-                  ? 'bg-emerald-400'
-                  : gpsStatus === 'FAIR'
-                  ? 'bg-amber-400'
-                  : 'bg-rose-400 animate-pulse'
-              }`}
-            />
-            <span className="text-slate-400 font-bold">{gpsStatus}</span>
-          </div>
+          <span className="text-slate-400 font-mono text-xs">🔋 92%</span>
         </div>
 
-        {/* Quick Utility Actions */}
-        <div className="flex items-center space-x-1.5">
+        <div className="flex items-center space-x-2">
           <button
-            onClick={handleNavigateDrop}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-sky-400 border border-slate-700 transition"
-            title="Navigate to Drop"
+            type="button"
+            onClick={() => setIsSpeedBubbleMode(true)}
+            className="px-3 py-1.5 bg-emerald-950/90 hover:bg-emerald-900 border border-emerald-500/70 text-emerald-300 rounded-full text-xs font-bold flex items-center space-x-1.5 shadow-md transition active:scale-95"
+            title="Floating Speed Bubble Overlay (Speed Only)"
           >
-            <Navigation className="w-4 h-4" />
+            <Gauge className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+            <span>Speed Bubble</span>
           </button>
 
           <button
-            onClick={() => setIsHudMode(true)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-            title="Windshield HUD Night Mode"
-          >
-            <FlipHorizontal className="w-4 h-4 text-emerald-400" />
-          </button>
-
-          <button
-            onClick={() => setIsMiniPipMode(true)}
-            className="p-2 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition"
-            title="Compact Floating Mini-PiP"
-          >
-            <Minimize2 className="w-4 h-4" />
-          </button>
-
-          <button
-            onClick={handleToggleSound}
-            className={`p-2 rounded-xl border transition ${
-              isSoundMuted
-                ? 'bg-slate-800/80 border-slate-700 text-slate-500'
-                : 'bg-emerald-950/60 border-emerald-600/40 text-emerald-400'
-            }`}
-            title={isSoundMuted ? 'Unmute Audio Voice Chimes' : 'Mute Voice Announcements'}
-          >
-            {isSoundMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
-          </button>
-
-          <button
+            type="button"
             onClick={() => setShowSosModal(true)}
-            className="p-2 rounded-xl bg-rose-950/80 border border-rose-600/60 text-rose-400 hover:bg-rose-900 transition"
-            title="SOS Emergency Assistance"
+            className="px-3.5 py-1.5 bg-red-950/80 border border-red-500/70 text-white rounded-full text-xs font-bold flex items-center space-x-1.5 shadow-[0_0_12px_rgba(239,68,68,0.35)]"
           >
-            <LifeBuoy className="w-4 h-4" />
+            <LifeBuoy className="w-3.5 h-3.5 text-red-400 animate-pulse" />
+            <span>Dispatch</span>
           </button>
         </div>
       </div>
 
-      {/* PRIMARY FARE DISPLAY (Hardware Taxi Meter Design) */}
-      <div className="relative bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 border-2 border-emerald-500/40 rounded-3xl p-5 shadow-2xl overflow-hidden">
-        <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-emerald-500 via-teal-400 to-sky-500 animate-pulse" />
-
-        <div className="flex items-center justify-between text-slate-400 text-xs pb-1">
-          <div className="flex items-center space-x-1 font-semibold uppercase tracking-wider text-[11px]">
-            <Receipt className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Digital Fare Meter</span>
-          </div>
-          <div className="text-[11px] font-mono text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20">
-            ₹{trip.tariffConfig.ratePerKm}/km
-          </div>
-        </div>
-
-        {/* Large High-Contrast Digital Amount */}
-        <div className="text-center py-3">
-          <div className="inline-flex items-baseline justify-center space-x-1">
-            <span className="text-3xl font-extrabold text-emerald-400 font-mono">₹</span>
-            <span className="text-6xl sm:text-7xl font-black font-mono tracking-tighter text-white drop-shadow-[0_0_25px_rgba(16,185,129,0.3)]">
-              {fareResult.totalFare}
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-400 uppercase tracking-widest mt-1">
-            Base ₹{fareResult.baseFare} • Running Total
-          </p>
-        </div>
-
-        {/* Live Metrics Grid (Distance, Duration, Waiting, Speed) */}
-        <div className="grid grid-cols-4 gap-2 pt-3 border-t border-slate-800/80 text-center font-mono">
-          <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/60">
-            <span className="text-[10px] text-slate-400 uppercase font-sans block">Distance</span>
-            <p className="text-lg font-bold text-white mt-0.5">{distanceKm.toFixed(2)}</p>
-            <span className="text-[9px] text-slate-400">KM</span>
-          </div>
-
-          <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/60">
-            <span className="text-[10px] text-slate-400 uppercase font-sans block">Duration</span>
-            <p className="text-lg font-bold text-white mt-0.5">{formatTime(durationSeconds)}</p>
-            <span className="text-[9px] text-slate-400">MIN</span>
-          </div>
-
-          <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/60">
-            <span className="text-[10px] text-slate-400 uppercase font-sans block">Waiting</span>
-            <p className="text-lg font-bold text-amber-400 mt-0.5">{formatTime(waitingSeconds)}</p>
-            <span className="text-[9px] text-slate-400">
-              {trip.tariffConfig.waitingGraceMinutes}m grace
-            </span>
-          </div>
-
-          <div className="bg-slate-950/80 p-2.5 rounded-xl border border-slate-800/60">
-            <span className="text-[10px] text-slate-400 uppercase font-sans block">Speed</span>
-            <p
-              className={`text-lg font-bold mt-0.5 ${
-                currentSpeedKmh > 80 ? 'text-rose-400 animate-pulse' : 'text-emerald-400'
-              }`}
-            >
-              {currentSpeedKmh}
-            </p>
-            <span className="text-[9px] text-slate-400">KM/H</span>
-          </div>
-        </div>
-      </div>
-
-      {/* Itemized Fare Breakdown Card */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2 text-xs">
-        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-          Fare Breakdown (Trip Tariff)
-        </span>
-
-        <div className="space-y-1.5 text-slate-300">
-          <div className="flex justify-between">
-            <span className="text-slate-400">Base Fare ({trip.tariffConfig.includedKm} km incl.)</span>
-            <span className="font-mono font-bold text-white">₹{fareResult.baseFare}</span>
-          </div>
-
-          <div className="flex justify-between">
-            <span className="text-slate-400">
-              Distance Fare ({Math.max(0, distanceKm - trip.tariffConfig.includedKm).toFixed(1)} km extra)
-            </span>
-            <span className="font-mono font-bold text-white">₹{fareResult.distanceFare}</span>
-          </div>
-
-          <div className="flex justify-between">
-            <span className="text-slate-400">Waiting Fare</span>
-            <span className="font-mono font-bold text-white">₹{fareResult.waitingFare}</span>
-          </div>
-
-          {fareResult.driverBata > 0 && (
-            <div className="flex justify-between">
-              <span className="text-slate-400">Driver Bata</span>
-              <span className="font-mono font-bold text-white">₹{fareResult.driverBata}</span>
-            </div>
-          )}
-
-          {(fareResult.toll > 0 || fareResult.parking > 0) && (
-            <div className="flex justify-between">
-              <span className="text-slate-400">Tolls &amp; Parking</span>
-              <span className="font-mono font-bold text-white">
-                ₹{fareResult.toll + fareResult.parking}
-              </span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* Extra Charges (Toll & Parking Controls) */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2 text-xs">
+      {/* Passenger & Route Info Header Card */}
+      <div className="bg-gradient-to-r from-slate-900 via-slate-950 to-slate-900 border border-slate-800 rounded-3xl p-3.5 shadow-xl space-y-2.5">
         <div className="flex items-center justify-between">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-            Toll &amp; Parking Extras
+          <span className="bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 px-3 py-0.5 rounded-full font-black text-[10px] tracking-wider uppercase">
+            ON TRIP
           </span>
-          <span className="font-mono font-bold text-emerald-400">
-            +₹{extraTolls + extraParking}
+          <span className="text-slate-400 font-mono text-xs font-bold">
+            TRIP #{trip.tripNumber || '4582'}
           </span>
         </div>
 
-        <div className="grid grid-cols-4 gap-2 pt-1">
-          <button
-            type="button"
-            onClick={() => handleAddToll(50)}
-            className="py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 font-bold rounded-xl transition text-center"
-          >
-            +₹50 Toll
-          </button>
-          <button
-            type="button"
-            onClick={() => handleAddToll(100)}
-            className="py-2 bg-slate-800 hover:bg-slate-700 text-sky-300 font-bold rounded-xl transition text-center"
-          >
-            +₹100 Toll
-          </button>
-          <button
-            type="button"
-            onClick={() => handleAddParking(50)}
-            className="py-2 bg-slate-800 hover:bg-slate-700 text-teal-300 font-bold rounded-xl transition text-center"
-          >
-            +₹50 Park
-          </button>
+        <div className="grid grid-cols-12 gap-2 items-center text-xs">
+          {/* Left: Customer Info */}
+          <div className="col-span-5 space-y-1">
+            <div className="flex items-center space-x-1.5">
+              <User className="w-3.5 h-3.5 text-slate-400" />
+              <div className="min-w-0">
+                <span className="text-[9px] text-slate-400 uppercase block font-semibold">Customer</span>
+                <span className="font-extrabold text-xs text-white truncate block">{trip.customerName || 'Arun Kumar'}</span>
+              </div>
+            </div>
+            <div className="flex items-center space-x-1.5 pt-0.5">
+              <div className="p-1 rounded-full bg-red-500/20 text-red-400">
+                <Phone className="w-3 h-3" />
+              </div>
+              <span className="text-slate-300 font-mono text-[11px] font-bold">{trip.customerMobile || '+91 98765 43210'}</span>
+              <a
+                href={`tel:${(trip.customerMobile || '').replace(/\s+/g, '')}`}
+                className="w-7 h-7 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 flex items-center justify-center hover:bg-emerald-500/30 transition shrink-0 ml-1"
+                title="Call Passenger"
+              >
+                <Phone className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          </div>
+
+          {/* Middle: Pickup & Drop */}
+          <div className="col-span-5 space-y-1.5 pl-1 border-l border-slate-800">
+            <div className="flex items-start space-x-1.5 min-w-0">
+              <MapPin className="w-3.5 h-3.5 text-red-500 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <span className="text-[9px] text-slate-400 uppercase block font-semibold">Pickup</span>
+                <span className="text-white font-bold text-xs truncate block">{trip.pickupAddress || 'Coimbatore Railway Station'}</span>
+              </div>
+            </div>
+            <div className="flex items-start space-x-1.5 min-w-0">
+              <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <span className="text-[9px] text-slate-400 uppercase block font-semibold">Drop</span>
+                <span className="text-white font-bold text-xs truncate block">{trip.dropAddress || 'RS Puram'}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Right: Navigate Button */}
+          <div className="col-span-2">
+            <button
+              type="button"
+              onClick={handleNavigateDrop}
+              className="w-full h-full py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-2xl flex flex-col items-center justify-center text-white transition shadow-md"
+              title="Navigate with Google Maps"
+            >
+              <Navigation className="w-5 h-5 text-white" />
+              <span className="text-[10px] font-extrabold mt-1">Navigate</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* DIGITAL TAXI METER CONTAINER */}
+      <div className="bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border border-slate-800/90 rounded-3xl p-4 shadow-2xl space-y-3">
+        {/* Meter Header Inside Box */}
+        <div className="flex items-center justify-between text-xs pb-1 border-b border-slate-800/80">
+          <div>
+            <h2 className="text-sm font-extrabold tracking-wider leading-none">
+              <span className="text-red-500">SBS</span> <span className="text-white">TRAVELS</span>
+            </h2>
+            <p className="text-[9px] text-slate-400 font-bold tracking-widest mt-0.5">
+              POWERED BY <span className="text-red-500 font-black">GET TAXI</span> <span className="text-white font-black">{driver.name.split(' ')[0] || 'BASHEER'}</span>
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black uppercase flex items-center space-x-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+              <span>LIVE</span>
+            </span>
+            <span className="font-mono text-xs font-bold text-slate-300">
+              {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
+          </div>
+        </div>
+
+        {/* MAIN DIGITAL LED FARE DISPLAY */}
+        <div className="bg-slate-950 border-2 border-slate-800 rounded-2xl p-4 flex items-center justify-between shadow-inner">
+          <div>
+            <span className="text-xs font-extrabold text-slate-400 tracking-wider uppercase block">FARE</span>
+            <span className="text-5xl font-black text-white font-mono">₹</span>
+          </div>
+          <div className="text-right">
+            <span className="text-5xl sm:text-6xl font-black font-mono tracking-tight text-white drop-shadow-[0_0_12px_rgba(255,255,255,0.25)]">
+              {fareResult.totalFare.toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        {/* 3 Metrics Cards (Distance, Time, Speed) */}
+        <div className="grid grid-cols-3 gap-2.5">
+          <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 text-center space-y-1">
+            <div className="flex items-center justify-center space-x-1 text-slate-400">
+              <Navigation className="w-4 h-4 text-white" />
+              <span className="text-[10px] uppercase font-extrabold">Distance</span>
+            </div>
+            <p className="text-base font-extrabold font-mono text-white">
+              {distanceKm.toFixed(1)} <span className="text-xs text-slate-400 font-normal">km</span>
+            </p>
+          </div>
+
+          <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 text-center space-y-1">
+            <div className="flex items-center justify-center space-x-1 text-slate-400">
+              <Clock className="w-4 h-4 text-white" />
+              <span className="text-[10px] uppercase font-extrabold">Time</span>
+            </div>
+            <p className="text-base font-extrabold font-mono text-white">
+              {formatTime(durationSeconds)}
+            </p>
+            <span className="text-[9px] text-slate-500 font-mono block">hh:mm:ss</span>
+          </div>
+
+          <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 text-center space-y-1">
+            <div className="flex items-center justify-center space-x-1 text-slate-400">
+              <Gauge className="w-4 h-4 text-white" />
+              <span className="text-[10px] uppercase font-extrabold">Speed</span>
+            </div>
+            <p className="text-base font-extrabold font-mono text-white">
+              {currentSpeedKmh} <span className="text-xs text-slate-400 font-normal">km/h</span>
+            </p>
+          </div>
+        </div>
+
+        {/* Trip Tariff Strip */}
+        <div className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 flex items-center justify-between text-xs">
+          <div className="flex items-center space-x-2">
+            <Coins className="w-5 h-5 text-amber-400 shrink-0" />
+            <div>
+              <span className="font-extrabold text-white block">Trip Tariff</span>
+              <span className="text-[10px] text-slate-400">Custom Rate (This Trip)</span>
+            </div>
+          </div>
+
+          <div className="text-right text-[11px] font-mono text-slate-300">
+            <div>Base Fare: <strong className="text-white">₹{trip.tariffConfig.baseFare || 50}</strong></div>
+            <div>Per Km: <strong className="text-white">₹{trip.tariffConfig.ratePerKm || 15}</strong></div>
+            <div>Per Min: <strong className="text-white">₹{trip.tariffConfig.waitingRatePerMinute || 2}</strong></div>
+          </div>
+
           <button
             type="button"
             onClick={() => setShowTollModal(true)}
-            className="py-2 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold rounded-xl transition text-center"
+            className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 rounded-xl text-xs font-bold border border-slate-700/60 transition"
           >
-            Custom
+            View Details &gt;
+          </button>
+        </div>
+
+        {/* Live Route Map Box */}
+        <div className="relative h-28 rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden flex items-center justify-center p-2">
+          <div className="absolute inset-0 bg-[radial-gradient(#1e293b_1px,transparent_1px)] [background-size:12px_12px] opacity-40" />
+          <svg className="absolute inset-0 w-full h-full stroke-sky-400 fill-none" strokeWidth="3">
+            <path d="M 30 70 Q 120 20 250 50 T 350 40" strokeDasharray="4 2" />
+          </svg>
+          <div className="absolute left-8 top-16 w-4 h-4 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center text-[8px] font-black text-white shadow-md">📍</div>
+          <div className="absolute left-1/2 top-10 w-6 h-6 rounded-full bg-sky-500 border-2 border-white flex items-center justify-center text-white text-xs shadow-lg animate-pulse">▲</div>
+          <div className="absolute right-8 top-10 w-4 h-4 rounded-full bg-red-500 border-2 border-white flex items-center justify-center text-[8px] font-black text-white shadow-md">📍</div>
+
+          <span className="absolute left-3 bottom-2 text-[10px] text-slate-400 font-extrabold tracking-wider">Google</span>
+          <button
+            type="button"
+            onClick={handleNavigateDrop}
+            className="absolute right-3 top-2 p-1.5 rounded-lg bg-slate-900/90 border border-slate-700 text-slate-300 hover:text-white"
+            title="Full Map View"
+          >
+            <MapPin className="w-3.5 h-3.5" />
           </button>
         </div>
       </div>
 
-      {/* Testing Simulation Bar (Available for browser testing) */}
-      <div className="bg-slate-950 p-2.5 rounded-2xl border border-slate-800/80 flex items-center justify-between text-xs">
-        <span className="text-[10px] text-slate-400 uppercase font-semibold">
-          Simulation Controls:
-        </span>
-        <div className="flex space-x-1.5">
-          <button
-            type="button"
-            onClick={handleSimulateMovement}
-            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-sky-300 rounded-lg text-[10px] font-bold transition"
-          >
-            +1.2 km GPS
-          </button>
+      {/* 3 Bottom Circle Meter Action Controls */}
+      <div className="grid grid-cols-3 gap-4 pt-2 items-center text-center">
+        {/* Left: Pause / Waiting */}
+        <div className="flex flex-col items-center space-y-1.5">
           <button
             type="button"
             onClick={handleSimulateWaiting}
-            className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-amber-300 rounded-lg text-[10px] font-bold transition"
+            className="w-16 h-16 rounded-full bg-slate-800 border-2 border-slate-700 hover:bg-slate-700 text-white flex items-center justify-center shadow-lg active:scale-95 transition"
+            title="Pause Meter / Add Waiting Time"
           >
-            +1 min Wait
+            <Pause className="w-7 h-7 text-white fill-white" />
           </button>
-        </div>
-      </div>
-
-      {/* Customer & Destination Info */}
-      <div className="bg-slate-900 border border-slate-800 rounded-2xl p-3.5 space-y-2.5 text-xs">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className="font-bold text-white">{trip.customerName}</span>
-            <span className="text-slate-400 font-mono text-[11px]">{trip.customerMobile}</span>
-          </div>
-          <a
-            href={`tel:${trip.customerMobile.replace(/\s+/g, '')}`}
-            className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20"
-          >
-            <Phone className="w-3.5 h-3.5" />
-          </a>
+          <span className="font-extrabold text-xs text-white uppercase block">PAUSE</span>
+          <span className="text-[10px] text-slate-400 uppercase font-semibold block">WAITING</span>
         </div>
 
-        <div className="flex items-start space-x-2 text-slate-300 pt-1 border-t border-slate-800/60">
-          <MapPin className="w-3.5 h-3.5 text-emerald-400 shrink-0 mt-0.5" />
-          <span className="truncate">{trip.dropAddress}</span>
-        </div>
-      </div>
-
-      {/* END TRIP / COMPLETE FLOW */}
-      <div className="pt-2">
-        {!showEndConfirm ? (
+        {/* Center: END TRIP (Glowing Red) */}
+        <div className="flex flex-col items-center space-y-1.5">
           <button
             type="button"
             onClick={() => setShowEndConfirm(true)}
-            className="w-full py-4 rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-extrabold text-sm tracking-wider uppercase shadow-xl shadow-rose-600/25 active:scale-[0.98] transition flex items-center justify-center space-x-2"
+            className="w-20 h-20 rounded-full bg-gradient-to-b from-red-500 to-rose-600 border-2 border-red-400/80 text-white flex items-center justify-center shadow-[0_0_30px_rgba(239,68,68,0.7)] hover:scale-105 active:scale-95 transition-all"
+            title="End Ride and Finalize Bill"
           >
-            <CheckCircle2 className="w-5 h-5" />
-            <span>FINALIZE &amp; END TRIP</span>
+            <Square className="w-8 h-8 text-white fill-white" />
           </button>
-        ) : (
-          <div className="bg-slate-900 border-2 border-rose-500/50 rounded-2xl p-4 space-y-3 animate-in fade-in zoom-in-95">
-            <div className="flex items-center space-x-2 text-rose-400 font-bold text-xs">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              <span>Confirm Trip Completion</span>
-            </div>
-            <p className="text-xs text-slate-300 leading-snug">
-              Are you sure customer has reached destination? Final fare will be calculated at{' '}
-              <span className="font-bold text-white">₹{fareResult.totalFare}</span>.
-            </p>
+          <span className="font-black text-sm text-white tracking-wider uppercase block">END TRIP</span>
+          <span className="text-[10px] text-slate-400 uppercase font-semibold block">COMPLETE</span>
+        </div>
 
-            <div className="grid grid-cols-2 gap-2 pt-1">
-              <button
-                type="button"
-                onClick={() => setShowEndConfirm(false)}
-                className="py-2.5 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
-              >
-                Continue Trip
-              </button>
-
-              <button
-                type="button"
-                disabled={isFinishing}
-                onClick={handleFinalizeTrip}
-                className="py-2.5 px-3 rounded-xl bg-rose-600 hover:bg-rose-500 text-white text-xs font-extrabold shadow-md transition"
-              >
-                {isFinishing ? 'Finalizing...' : 'YES, COMPLETE'}
-              </button>
-            </div>
-          </div>
-        )}
+        {/* Right: More / Options */}
+        <div className="flex flex-col items-center space-y-1.5">
+          <button
+            type="button"
+            onClick={() => setShowTollModal(true)}
+            className="w-16 h-16 rounded-full bg-slate-800 border-2 border-slate-700 hover:bg-slate-700 text-white flex items-center justify-center shadow-lg active:scale-95 transition"
+            title="Tolls, Parking & Custom Extras"
+          >
+            <MoreVertical className="w-7 h-7 text-white" />
+          </button>
+          <span className="font-extrabold text-xs text-white uppercase block">MORE</span>
+          <span className="text-[10px] text-slate-400 uppercase font-semibold block">OPTIONS</span>
+        </div>
       </div>
 
       {/* CUSTOM TOLL / PARKING MODAL */}
@@ -1010,6 +1016,66 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* END TRIP / COMPLETE TRIP CONFIRMATION MODAL */}
+      {showEndConfirm && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-xs rounded-3xl p-5 shadow-2xl space-y-4 animate-in zoom-in-95">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2 text-rose-500">
+                <Square className="w-5 h-5 fill-rose-500" />
+                <h3 className="font-extrabold text-white text-sm">End Ride & Complete Trip?</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowEndConfirm(false)}
+                className="text-slate-400 hover:text-white"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="bg-slate-950 p-3 rounded-2xl border border-slate-800 text-center space-y-1">
+              <span className="text-[10px] text-slate-400 font-extrabold uppercase block">Final Total Fare</span>
+              <p className="text-3xl font-black font-mono text-emerald-400">₹{fareResult.totalFare.toFixed(2)}</p>
+              <span className="text-[10px] text-slate-400">Dist: {distanceKm.toFixed(1)} km | Time: {formatTime(durationSeconds)}</span>
+            </div>
+
+            <p className="text-xs text-slate-300 text-center">
+              Are you sure you want to stop the meter and generate the fare bill summary?
+            </p>
+
+            <div className="grid grid-cols-2 gap-2 pt-1">
+              <button
+                type="button"
+                disabled={isFinishing}
+                onClick={() => setShowEndConfirm(false)}
+                className="py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs rounded-xl transition"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isFinishing}
+                onClick={() => {
+                  setShowEndConfirm(false);
+                  handleFinalizeTrip();
+                }}
+                className="py-3 bg-gradient-to-r from-red-600 via-rose-600 to-red-600 hover:from-red-500 hover:to-rose-500 text-white font-extrabold text-xs rounded-xl transition shadow-lg shadow-red-600/30 active:scale-95 flex items-center justify-center space-x-1"
+              >
+                {isFinishing ? (
+                  <span>Finishing...</span>
+                ) : (
+                  <>
+                    <CheckCircle2 className="w-4 h-4 text-white" />
+                    <span>Complete Trip</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       )}
