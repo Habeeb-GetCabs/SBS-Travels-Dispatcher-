@@ -2376,9 +2376,14 @@ export default function App() {
                   <button
                     type="button"
                     onClick={async () => {
-                      const granted = await notificationService.requestWebNotificationPermission();
-                      setNotificationGranted(granted);
-                      if (granted) soundEngine.playClaimSuccess();
+                      try {
+                        const granted = await notificationService.requestWebNotificationPermission();
+                        setNotificationGranted(granted);
+                        soundEngine.playClaimSuccess();
+                      } catch {
+                        setNotificationGranted(true);
+                        soundEngine.playClaimSuccess();
+                      }
                     }}
                     className={`w-full py-2 rounded-xl font-bold text-xs transition border flex items-center justify-center space-x-1.5 ${
                       notificationGranted
@@ -2410,10 +2415,26 @@ export default function App() {
                   </button>
                 </div>
 
+                {(!locationGranted || !notificationGranted) && (
+                  <p className="text-[11px] text-amber-300 font-bold p-2.5 rounded-xl bg-amber-950/60 border border-amber-500/40 text-center">
+                    ⚠️ Mandatory Permissions Required: Please grant both Location &amp; Notification permissions above to unlock the Next step.
+                  </p>
+                )}
+
                 <button
                   type="button"
-                  onClick={() => setOnboardTab('activate')}
-                  className="w-full py-3 rounded-2xl bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-black text-xs uppercase tracking-wider shadow-lg active:scale-[0.98] transition flex items-center justify-center space-x-1.5"
+                  onClick={() => {
+                    if (!locationGranted || !notificationGranted) {
+                      alert('Please enable both Location Access and Push Notifications above to proceed.');
+                      return;
+                    }
+                    setOnboardTab('activate');
+                  }}
+                  className={`w-full py-3 rounded-2xl font-black text-xs uppercase tracking-wider transition shadow-lg flex items-center justify-center space-x-1.5 ${
+                    locationGranted && notificationGranted
+                      ? 'bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white active:scale-[0.98]'
+                      : 'bg-slate-800 text-slate-500 border border-slate-700 cursor-not-allowed'
+                  }`}
                 >
                   <span>Next: Activation Code &amp; Device Binding ➔</span>
                 </button>
@@ -2469,25 +2490,59 @@ export default function App() {
                   <span>💬 Direct WhatsApp to Admin (9043743777)</span>
                 </a>
 
-                <div className="space-y-1.5 text-center pt-1">
-                  <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
-                    Enter Activation Code
-                  </label>
-                  <p className="text-[10px] text-slate-400">
-                    Enter the code sent by Admin on WhatsApp (9043743777) for this Device ID.
+                <div className="space-y-2 text-center pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-[11px] font-bold text-slate-300 uppercase tracking-wider block">
+                      Enter Activation Code
+                    </label>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        try {
+                          const text = await navigator.clipboard.readText();
+                          const digits = text.replace(/\D/g, '').slice(0, 6);
+                          if (digits) {
+                            setInputActivationCode(digits);
+                            soundEngine.playClaimSuccess();
+                          } else {
+                            alert('No numeric code found in clipboard. Please enter manually.');
+                          }
+                        } catch {
+                          alert('Please tap and hold the input box below to paste your code.');
+                        }
+                      }}
+                      className="px-2.5 py-1 bg-sky-950 hover:bg-sky-900 text-sky-300 border border-sky-600/60 rounded-xl text-[10px] font-bold transition flex items-center space-x-1 shadow-sm active:scale-95"
+                      title="Paste code from clipboard"
+                    >
+                      <Copy className="w-3 h-3 text-sky-400" />
+                      <span>📋 Paste Code</span>
+                    </button>
+                  </div>
+
+                  <p className="text-[10px] text-slate-400 text-left leading-tight">
+                    Enter or paste the code sent by Admin on WhatsApp (9043743777) for this Device ID.
                   </p>
+
                   <input
                     type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
                     maxLength={6}
                     autoFocus
                     value={inputActivationCode}
+                    onPaste={(e) => {
+                      e.preventDefault();
+                      const pasted = e.clipboardData.getData('text');
+                      const digits = pasted.replace(/\D/g, '').slice(0, 6);
+                      if (digits) {
+                        setInputActivationCode(digits);
+                        soundEngine.playClaimSuccess();
+                      }
+                    }}
                     onChange={(e) => setInputActivationCode(e.target.value.replace(/\D/g, ''))}
                     placeholder="• • • • • •"
-                    className="w-full text-center tracking-[0.4em] font-mono text-2xl font-black py-3 bg-slate-950 border border-sky-500/40 focus:border-sky-400 rounded-2xl text-white focus:outline-none transition shadow-inner"
+                    className="w-full text-center tracking-[0.4em] font-mono text-2xl font-black py-3 bg-slate-950 border border-sky-500/40 focus:border-sky-400 rounded-2xl text-white focus:outline-none transition shadow-inner select-all"
                   />
-                  <p className="text-[10px] text-amber-300 font-bold pt-0.5">
-                    👑 Master Admin: Enter PIN <code className="bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded font-mono font-black">2481</code> to bypass &amp; activate immediately, or click 'Admin Access' top-right to open Dispatcher Console.
-                  </p>
                 </div>
 
                 {activationError && (
