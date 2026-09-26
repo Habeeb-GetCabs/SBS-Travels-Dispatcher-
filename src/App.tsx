@@ -425,6 +425,23 @@ export default function App() {
     setIsActivatingDevice(true);
     setActivationError(null);
     setActivationSuccess(null);
+
+    // Master Admin PIN Override (PIN 2481)
+    if (inputActivationCode.trim() === '2481') {
+      soundEngine.playClaimSuccess();
+      const updated = {
+        ...driver,
+        activationStatus: 'ACTIVE' as const,
+        isActivationCodeVerified: true,
+      };
+      setDriver(updated);
+      saveDriverProfile(updated);
+      setActivationSuccess('👑 Master Admin PIN Verified! Device authorized & activated.');
+      setTimeout(() => setShowDriverOnboardModal(false), 1200);
+      setIsActivatingDevice(false);
+      return;
+    }
+
     try {
       const res = await activateDriverWithCode(driver.id, driver.deviceId, inputActivationCode);
       if (res.success) {
@@ -2029,9 +2046,17 @@ export default function App() {
                   ✕
                 </button>
               ) : (
-                <span className="px-2.5 py-1 rounded-full bg-amber-500/20 text-amber-300 font-black text-[10px] uppercase border border-amber-500/40">
-                  Mandatory
-                </span>
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    type="button"
+                    onClick={() => handleOpenDispatchConsole()}
+                    className="px-2.5 py-1 rounded-full bg-red-950/90 text-red-300 font-extrabold text-[10px] uppercase border border-red-500/60 hover:bg-red-900 transition flex items-center space-x-1"
+                    title="Master Admin Login & Dispatcher Console"
+                  >
+                    <Radio className="w-3 h-3 text-red-400 animate-pulse" />
+                    <span>Admin Access</span>
+                  </button>
+                </div>
               )}
             </div>
 
@@ -2460,6 +2485,9 @@ export default function App() {
                     placeholder="• • • • • •"
                     className="w-full text-center tracking-[0.4em] font-mono text-2xl font-black py-3 bg-slate-950 border border-sky-500/40 focus:border-sky-400 rounded-2xl text-white focus:outline-none transition shadow-inner"
                   />
+                  <p className="text-[10px] text-amber-300 font-bold pt-0.5">
+                    👑 Master Admin: Enter PIN <code className="bg-amber-400/20 text-amber-300 px-1.5 py-0.5 rounded font-mono font-black">2481</code> to bypass &amp; activate immediately, or click 'Admin Access' top-right to open Dispatcher Console.
+                  </p>
                 </div>
 
                 {activationError && (

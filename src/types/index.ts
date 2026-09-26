@@ -45,6 +45,7 @@ export interface DriverProfile {
   photoUrl?: string;
   homeLocation?: string;
   activationCode?: string;
+  isActivationCodeVerified?: boolean;
 }
 
 // Per-Trip Server-Authoritative Tariff Configuration

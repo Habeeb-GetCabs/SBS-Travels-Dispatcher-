@@ -55,7 +55,7 @@ export const getStoredDriverProfile = (): DriverProfile => {
   if (authStored) {
     try {
       const parsed = JSON.parse(authStored);
-      if (parsed) {
+      if (parsed && parsed.isActivationCodeVerified && parsed.activationStatus === 'ACTIVE') {
         return {
           ...parsed,
           deviceId: parsed.deviceId || currentDeviceId,
@@ -71,6 +71,10 @@ export const getStoredDriverProfile = (): DriverProfile => {
     try {
       const parsed = JSON.parse(stored);
       if (parsed) {
+        // Enforce PENDING if activation code was not explicitly verified
+        if (!parsed.isActivationCodeVerified || parsed.id === 'drv-sbs-101') {
+          parsed.activationStatus = 'PENDING';
+        }
         return {
           ...parsed,
           deviceId: parsed.deviceId || currentDeviceId,
@@ -82,16 +86,17 @@ export const getStoredDriverProfile = (): DriverProfile => {
   }
 
   const defaultDriver: DriverProfile = {
-    id: 'drv-sbs-101',
-    driverCode: 'DRV0051',
-    name: 'SBS Driver',
-    mobile: '+91 98401 22481',
-    vehicleNumber: 'TN 38 BJ 1234',
+    id: `drv-${currentDeviceId.slice(-6)}`,
+    driverCode: 'DRV0001',
+    name: 'S. Ramesh',
+    mobile: '9876543210',
+    vehicleNumber: 'TN 38 AA 1234',
     vehicleModel: 'Maruti Tour S',
     homeLocation: 'Gandhipuram, Coimbatore',
-    operationalStatus: 'READY',
-    activationStatus: 'ACTIVE',
+    operationalStatus: 'OFFLINE',
+    activationStatus: 'PENDING',
     deviceId: currentDeviceId,
+    isActivationCodeVerified: false,
   };
 
   if (typeof window !== 'undefined') {
@@ -1864,6 +1869,7 @@ export const activateDriverWithCode = async (
           ...current,
           activationStatus: 'ACTIVE',
           deviceId: cleanDevice,
+          isActivationCodeVerified: true,
         };
         saveDriverProfile(updated);
         return { success: true };
@@ -1919,6 +1925,7 @@ export const activateDriverWithCode = async (
           ...current,
           activationStatus: 'ACTIVE',
           deviceId: cleanDevice,
+          isActivationCodeVerified: true,
         };
         saveDriverProfile(updated);
         return { success: true };
@@ -1944,6 +1951,7 @@ export const activateDriverWithCode = async (
     ...current,
     activationStatus: 'ACTIVE',
     deviceId: cleanDevice,
+    isActivationCodeVerified: true,
   };
   saveDriverProfile(updated);
   return { success: true };
