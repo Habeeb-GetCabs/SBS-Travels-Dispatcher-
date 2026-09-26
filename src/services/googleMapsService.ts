@@ -41,72 +41,112 @@ export const setStoredGoogleMapsKey = (key: string): void => {
   }
 };
 
-// Known landmark database for immediate offline/fallback autocomplete
+// Known landmark database for immediate offline/fallback autocomplete (Coimbatore Base)
 const COMMON_LANDMARKS: PlaceSuggestion[] = [
   {
-    placeId: 'ChIJ574W5uNnUjoR-K8u5Z3P_Z0',
-    primaryText: 'Chennai International Airport (MAA)',
-    secondaryText: 'Meenambakkam, Chennai, Tamil Nadu',
-    fullAddress: 'GST Rd, Meenambakkam, Chennai, Tamil Nadu 600027',
-    latitude: 12.9941,
-    longitude: 80.1709,
+    placeId: 'ChIJ_yWJ1MhpqDsR0Hk9V7Q4e7M',
+    primaryText: 'Coimbatore International Airport (CJB)',
+    secondaryText: 'Avinashi Road, Peelamedu, Coimbatore, Tamil Nadu',
+    fullAddress: 'Avinashi Rd, Peelamedu, Coimbatore, Tamil Nadu 641014',
+    latitude: 11.0300,
+    longitude: 77.0434,
   },
   {
-    placeId: 'ChIJS_b8uI1nUjoRqQ3V7gKvZ98',
-    primaryText: 'Puratchi Thalaivar Dr. M.G.R. Central Railway Station',
-    secondaryText: 'Kannappar Thidal, Periyamet, Chennai',
-    fullAddress: 'Kannappar Thidal, Periyamet, Chennai, Tamil Nadu 600003',
-    latitude: 13.0827,
-    longitude: 80.2707,
+    placeId: 'ChIJ6a6c4F1nUjoR_M4Q4Vf18eY_cbe',
+    primaryText: 'Coimbatore Junction Railway Station (CBE)',
+    secondaryText: 'State Bank Road, Gopalapuram, Coimbatore, Tamil Nadu',
+    fullAddress: 'State Bank Rd, Gopalapuram, Coimbatore, Tamil Nadu 641018',
+    latitude: 11.0018,
+    longitude: 76.9629,
   },
   {
-    placeId: 'ChIJQ-s4HnBnUjoR1fG86w0Z9_0',
-    primaryText: 'T. Nagar Panagal Park',
-    secondaryText: 'Thyagaraya Nagar, Chennai, Tamil Nadu',
-    fullAddress: 'Prakasam Rd, Panagal Park, T. Nagar, Chennai, Tamil Nadu 600017',
-    latitude: 13.0405,
-    longitude: 80.2337,
+    placeId: 'ChIJQ-s4HnBnUjoR1fG86w0Z9_gandhi',
+    primaryText: 'Gandhipuram Town Bus Stand',
+    secondaryText: 'Cross Cut Road, Gandhipuram, Coimbatore, Tamil Nadu',
+    fullAddress: 'Cross Cut Rd, Gandhipuram, Coimbatore, Tamil Nadu 641012',
+    latitude: 11.0168,
+    longitude: 76.9558,
   },
   {
-    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE',
-    primaryText: 'OMR IT Corridor (Tidel Park)',
-    secondaryText: 'Rajiv Gandhi Salai, Taramani, Chennai',
-    fullAddress: 'No.4, Rajiv Gandhi Salai, Taramani, Chennai, Tamil Nadu 600113',
-    latitude: 12.9892,
-    longitude: 80.2476,
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_tidel',
+    primaryText: 'TIDEL Park Coimbatore (ELCOSEZ / PSG Tech)',
+    secondaryText: 'Civil Aerodrome Post, Peelamedu, Coimbatore, Tamil Nadu',
+    fullAddress: 'Avinashi Rd, Peelamedu, Coimbatore, Tamil Nadu 641014',
+    latitude: 11.0264,
+    longitude: 77.0270,
   },
   {
-    placeId: 'ChIJ6a6c4F1nUjoR_M4Q4Vf18eY',
-    primaryText: 'Chennai Mofussil Bus Terminus (CMBT)',
-    secondaryText: 'Koyambedu, Chennai, Tamil Nadu',
-    fullAddress: 'Jawaharlal Nehru Rd, Koyambedu, Chennai, Tamil Nadu 600107',
-    latitude: 13.0694,
-    longitude: 80.2057,
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_ukkadam',
+    primaryText: 'Ukkadam Bus Stand',
+    secondaryText: 'Palakkad Road, Ukkadam, Coimbatore, Tamil Nadu',
+    fullAddress: 'Palakkad Rd, Ukkadam, Coimbatore, Tamil Nadu 641001',
+    latitude: 10.9902,
+    longitude: 76.9602,
   },
   {
-    placeId: 'ChIJvX_Fv7dmUjoR2W3d1k6V-1U',
-    primaryText: 'SIPCOT IT Park Siruseri',
-    secondaryText: 'Old Mahabalipuram Rd, Siruseri, Tamil Nadu',
-    fullAddress: 'OMR, Siruseri, Tamil Nadu 603103',
-    latitude: 12.8256,
-    longitude: 80.2209,
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_rspuram',
+    primaryText: 'RS Puram DB Road',
+    secondaryText: 'Diwan Bahadur Road, RS Puram, Coimbatore, Tamil Nadu',
+    fullAddress: 'DB Rd, RS Puram, Coimbatore, Tamil Nadu 641002',
+    latitude: 11.0095,
+    longitude: 76.9452,
   },
   {
-    placeId: 'ChIJ_Q868sBoUjoRNr88V90a5-A',
-    primaryText: 'Mahabalipuram Shore Temple',
-    secondaryText: 'Mamallapuram, Tamil Nadu',
-    fullAddress: 'Fisherman Colony, Mahabalipuram, Tamil Nadu 603104',
-    latitude: 12.6163,
-    longitude: 80.1983,
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_singanallur',
+    primaryText: 'Singanallur Bus Stand',
+    secondaryText: 'Trichy Road, Singanallur, Coimbatore, Tamil Nadu',
+    fullAddress: 'Trichy Rd, Singanallur, Coimbatore, Tamil Nadu 641005',
+    latitude: 10.9982,
+    longitude: 77.0245,
   },
   {
-    placeId: 'ChIJh982j4BlUjoRgM4Z9W1Y-54',
-    primaryText: 'Tambaram Railway Station',
-    secondaryText: 'East Tambaram, Chennai, Tamil Nadu',
-    fullAddress: 'Grand Southern Trunk Rd, Tambaram, Chennai, Tamil Nadu 600045',
-    latitude: 12.9249,
-    longitude: 80.1287,
-  }
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_saravanampatti',
+    primaryText: 'Saravanampatti IT Hub (CHIL SEZ / Prozone Mall)',
+    secondaryText: 'Sathy Road, Saravanampatti, Coimbatore, Tamil Nadu',
+    fullAddress: 'Sathy Rd, Saravanampatti, Coimbatore, Tamil Nadu 641035',
+    latitude: 11.0784,
+    longitude: 76.9926,
+  },
+  {
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_brooks',
+    primaryText: 'Brookefields Mall',
+    secondaryText: 'Krishnaswamy Road, Ram Nagar, Coimbatore, Tamil Nadu',
+    fullAddress: '678, Krishnaswamy Rd, Ram Nagar, Coimbatore, Tamil Nadu 641001',
+    latitude: 11.0118,
+    longitude: 76.9585,
+  },
+  {
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_marudhamalai',
+    primaryText: 'Marudhamalai Murugan Temple',
+    secondaryText: 'Marudhamalai Adivaram, Coimbatore, Tamil Nadu',
+    fullAddress: 'Marudhamalai, Coimbatore, Tamil Nadu 641046',
+    latitude: 11.0470,
+    longitude: 76.8520,
+  },
+  {
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_sulur',
+    primaryText: 'Sulur Bus Stand / Air Force Station',
+    secondaryText: 'Trichy Road, Sulur, Coimbatore, Tamil Nadu',
+    fullAddress: 'Trichy Rd, Sulur, Coimbatore, Tamil Nadu 641402',
+    latitude: 11.0268,
+    longitude: 77.1264,
+  },
+  {
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_thudiyalur',
+    primaryText: 'Thudiyalur Junction',
+    secondaryText: 'Mettupalayam Road, Thudiyalur, Coimbatore, Tamil Nadu',
+    fullAddress: 'Mettupalayam Rd, Thudiyalur, Coimbatore, Tamil Nadu 641034',
+    latitude: 11.0825,
+    longitude: 76.9421,
+  },
+  {
+    placeId: 'ChIJv8v86hhnUjoRsM8P39g89eE_kovaipudur',
+    primaryText: 'Kovaipudur VLB College Junction',
+    secondaryText: 'Kovaipudur, Coimbatore, Tamil Nadu',
+    fullAddress: 'Kovaipudur, Coimbatore, Tamil Nadu 641042',
+    latitude: 10.9385,
+    longitude: 76.9325,
+  },
 ];
 
 // Load Google Maps JS SDK dynamically to support native browser Places/Routes API calls
@@ -155,7 +195,7 @@ export const createPlacesSessionToken = (): string => {
   });
 };
 
-// Autocomplete using Google Places API (New) - Bypasses CORS via Proxy and JS SDK
+// Autocomplete using Google Places API & JS SDK AutocompleteService (Coimbatore Biased)
 export const fetchPlacePredictions = async (
   input: string,
   sessionToken: string
@@ -165,7 +205,45 @@ export const fetchPlacePredictions = async (
 
   const key = getStoredGoogleMapsKey();
   if (key) {
-    // Attempt 1: Server proxy (bypasses browser CORS preflight restrictions)
+    // Attempt 1: Standard Google Maps JS SDK AutocompleteService (Highest Reliability in Web Browsers)
+    try {
+      const google = await loadGoogleMapsSDK(key);
+      if (google?.maps?.places?.AutocompleteService) {
+        const autoService = new google.maps.places.AutocompleteService();
+        const predictions = await new Promise<any[]>((resolve) => {
+          autoService.getPlacePredictions(
+            {
+              input: query,
+              componentRestrictions: { country: 'in' },
+              locationBias: new google.maps.LatLngBounds(
+                new google.maps.LatLng(10.8, 76.8), // Coimbatore S/W
+                new google.maps.LatLng(11.3, 77.3)  // Coimbatore N/E
+              ),
+            },
+            (results: any[], status: any) => {
+              if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+                resolve(results);
+              } else {
+                resolve([]);
+              }
+            }
+          );
+        });
+
+        if (predictions && predictions.length > 0) {
+          return predictions.map((p) => ({
+            placeId: p.place_id,
+            primaryText: p.structured_formatting?.main_text || p.description,
+            secondaryText: p.structured_formatting?.secondary_text || '',
+            fullAddress: p.description,
+          }));
+        }
+      }
+    } catch (sdkErr) {
+      console.warn('Google Maps AutocompleteService notice:', sdkErr);
+    }
+
+    // Attempt 2: Server proxy endpoint
     try {
       const response = await fetch('/api/gmaps/places/v1/places:autocomplete', {
         method: 'POST',
@@ -177,6 +255,12 @@ export const fetchPlacePredictions = async (
           input: query,
           sessionToken: sessionToken,
           includedRegionCodes: ['in'],
+          locationBias: {
+            circle: {
+              center: { latitude: 11.0168, longitude: 76.9558 },
+              radius: 50000.0,
+            },
+          },
         }),
       });
 
@@ -197,70 +281,9 @@ export const fetchPlacePredictions = async (
     } catch (err) {
       console.warn('Google Places Proxy attempt notice:', err);
     }
-
-    // Attempt 2: Direct Google Places REST Endpoint
-    try {
-      const response = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': key,
-        },
-        body: JSON.stringify({
-          input: query,
-          sessionToken: sessionToken,
-          includedRegionCodes: ['in'],
-        }),
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        if (data.suggestions && Array.isArray(data.suggestions)) {
-          return data.suggestions.map((s: any) => {
-            const pred = s.placePrediction;
-            return {
-              placeId: pred.placeId,
-              primaryText: pred.structuredFormat?.mainText?.text || pred.text?.text || query,
-              secondaryText: pred.structuredFormat?.secondaryText?.text || '',
-              fullAddress: pred.text?.text || pred.structuredFormat?.mainText?.text || query,
-            };
-          });
-        }
-      }
-    } catch (err) {
-      console.warn('Direct Google Places REST notice:', err);
-    }
-
-    // Attempt 3: Google Maps JS SDK (if loaded)
-    try {
-      const google = await loadGoogleMapsSDK(key);
-      if (google?.maps?.places) {
-        const placesLib = (await google.maps.importLibrary('places')) as any;
-        if (placesLib?.AutocompleteSuggestion) {
-          const res = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
-            input: query,
-            sessionToken: sessionToken ? new google.maps.places.AutocompleteSessionToken() : undefined,
-            includedRegionCodes: ['in'],
-          });
-          if (res?.suggestions && res.suggestions.length > 0) {
-            return res.suggestions.map((s: any) => {
-              const pred = s.placePrediction;
-              return {
-                placeId: pred.placeId || pred.place,
-                primaryText: pred.mainText?.text || pred.text?.text || query,
-                secondaryText: pred.secondaryText?.text || '',
-                fullAddress: pred.text?.text || pred.mainText?.text || query,
-              };
-            });
-          }
-        }
-      }
-    } catch (sdkErr) {
-      console.warn('Google Maps JS SDK Autocomplete notice:', sdkErr);
-    }
   }
 
-  // Matching from landmark database as fallback if no API key or network failure
+  // Matching from Coimbatore landmark database as fallback
   const lower = query.toLowerCase();
   const matched = COMMON_LANDMARKS.filter(
     (l) =>
@@ -278,7 +301,7 @@ export const fetchPlacePredictions = async (
     {
       placeId: `custom-${Date.now()}`,
       primaryText: query,
-      secondaryText: 'Custom Entered Location',
+      secondaryText: 'Coimbatore Location',
       fullAddress: query,
     },
   ];
@@ -355,9 +378,32 @@ export const fetchPlaceDetails = async (
       console.warn('Direct Google Place Details REST notice:', err);
     }
 
-    // Attempt 3: JS SDK Place class
+    // Attempt 3: JS SDK Geocoder & Place class
     try {
       const google = await loadGoogleMapsSDK(key);
+      if (google?.maps?.Geocoder) {
+        const geocoder = new google.maps.Geocoder();
+        const geoResult = await new Promise<any>((resolve) => {
+          geocoder.geocode({ placeId }, (results: any[], status: any) => {
+            if (status === 'OK' && results && results[0]) {
+              resolve(results[0]);
+            } else {
+              resolve(null);
+            }
+          });
+        });
+
+        if (geoResult) {
+          return {
+            placeId,
+            name: geoResult.formatted_address?.split(',')[0] || placeId,
+            formattedAddress: geoResult.formatted_address || '',
+            latitude: geoResult.geometry.location.lat(),
+            longitude: geoResult.geometry.location.lng(),
+          };
+        }
+      }
+
       if (google?.maps?.places) {
         const placesLib = (await google.maps.importLibrary('places')) as any;
         if (placesLib?.Place) {

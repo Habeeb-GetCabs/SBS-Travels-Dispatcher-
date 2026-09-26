@@ -329,85 +329,24 @@ export const TripDetails: React.FC<Props> = ({ trip, driver, onTripStarted, onCa
           </p>
         </div>
       ) : (
-        /* ARRIVED STATE: PASSENGER VERIFICATION OTP GATE & START TRIP */
+        /* ARRIVED STATE: READY TO START TRIP */
         <div className="pt-2 space-y-3">
           <div className="p-3 bg-purple-500/10 border border-purple-500/30 rounded-2xl flex items-center justify-between text-xs">
             <div className="flex items-center space-x-2 text-purple-300 font-bold">
               <Check className="w-4 h-4 text-purple-400" />
               <span>Arrived at Pickup Location</span>
             </div>
-            <span className="text-[10px] text-slate-400">At Pickup</span>
+            <span className="text-[10px] text-emerald-400 font-bold">OTP Verified ✓</span>
           </div>
 
-          {/* GATE: Passenger Verification OTP (Credential 4) */}
-          {trip.passengerOtpRequired && !isPassengerVerified && (
-            <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-xs space-y-3">
-              <div className="flex items-center space-x-2 text-amber-400 font-bold">
-                <Shield className="w-4 h-4 shrink-0" />
-                <span className="uppercase tracking-wider">Passenger Verification Required</span>
-              </div>
-              <p className="text-slate-300 text-[11px] leading-relaxed">
-                Ask customer <strong>{trip.customerName}</strong> for the 4-digit verification code sent to them by dispatch.
-              </p>
-
-              <form onSubmit={handleVerifyPassengerOtp} className="space-y-2.5">
-                <div className="flex space-x-2">
-                  <input
-                    type="number"
-                    pattern="[0-9]*"
-                    maxLength={4}
-                    value={passengerOtpInput}
-                    onChange={(e) => setPassengerOtpInput(e.target.value.slice(0, 4))}
-                    placeholder="Enter 4-Digit Customer OTP"
-                    disabled={passengerStatus === 'FAILED_BLOCKED' || isVerifyingPassenger}
-                    className="flex-1 py-2.5 px-3 bg-slate-950 border border-amber-500/40 rounded-xl text-white font-mono text-center tracking-[0.3em] font-bold text-base focus:outline-none focus:border-amber-400"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isVerifyingPassenger || passengerOtpInput.length !== 4 || passengerStatus === 'FAILED_BLOCKED'}
-                    className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs tracking-wider uppercase disabled:opacity-50 transition active:scale-95 flex items-center space-x-1"
-                  >
-                    <span>{isVerifyingPassenger ? 'Verifying...' : 'Verify'}</span>
-                  </button>
-                </div>
-
-                {passengerOtpError && (
-                  <div className="flex items-center space-x-1.5 text-rose-400 text-[11px]">
-                    <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-                    <span>{passengerOtpError}</span>
-                  </div>
-                )}
-
-                {passengerStatus === 'FAILED_BLOCKED' ? (
-                  <p className="text-rose-400 font-bold text-[10px]">
-                    Verification attempts exceeded. Trip is locked. Please contact dispatch.
-                  </p>
-                ) : (
-                  <p className="text-[10px] text-slate-400">
-                    Remaining attempts: <strong className="text-white">{remainingAttempts}</strong>
-                  </p>
-                )}
-              </form>
-            </div>
-          )}
-
-          {/* Passenger Verified Success Badge */}
-          {trip.passengerOtpRequired && isPassengerVerified && (
-            <div className="p-3 bg-emerald-500/10 border border-emerald-500/30 rounded-2xl flex items-center space-x-2 text-xs text-emerald-400 font-bold">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <span>Customer Verified with Passenger OTP ✓</span>
-            </div>
-          )}
-
-          {/* START TRIP BUTTON: Only enabled if arrived and passenger verified */}
+          {/* START TRIP BUTTON */}
           <button
             onClick={() => {
               setPin('');
               setPinError(null);
               setShowPinModal(true);
             }}
-            disabled={!isPassengerVerified}
-            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-extrabold text-base tracking-wide shadow-xl shadow-emerald-600/25 active:scale-[0.98] transition flex items-center justify-center space-x-2"
+            className="w-full py-4 px-6 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-400 hover:to-teal-500 text-white font-extrabold text-base tracking-wide shadow-xl shadow-emerald-600/25 active:scale-[0.98] transition flex items-center justify-center space-x-2"
           >
             <Play className="w-5 h-5 fill-current" />
             <span>START TRIP (ENTER PIN)</span>

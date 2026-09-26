@@ -1189,7 +1189,7 @@ export const AdminDispatchModal: React.FC<Props> = ({
                       value={pickupAddress}
                       onChange={(e) => handlePickupChange(e.target.value)}
                       onFocus={() => pickupSuggestions.length > 0 && setShowPickupDropdown(true)}
-                      placeholder="Type 3+ letters to search (e.g. Chennai Central)"
+                      placeholder="Type 3+ letters to search (e.g. Gandhipuram, Airport)"
                       className="w-full text-xs py-2 pl-8 pr-3 bg-slate-950 border border-slate-700 rounded-xl text-white focus:outline-none focus:border-sky-500"
                     />
                     <MapPin className="w-3.5 h-3.5 text-sky-400 absolute left-2.5 top-2.5" />
