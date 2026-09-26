@@ -308,7 +308,8 @@ export const AdminDispatchModal: React.FC<Props> = ({
   };
 
   const placesSessionToken = useRef<string>(createPlacesSessionToken());
-  const debounceTimer = useRef<any>(null);
+  const pickupDebounceTimer = useRef<any>(null);
+  const dropDebounceTimer = useRef<any>(null);
 
   // Authoritative Session Verification & Supabase Realtime Subscription
   useEffect(() => {
@@ -461,18 +462,24 @@ export const AdminDispatchModal: React.FC<Props> = ({
   const handlePickupChange = (value: string) => {
     setPickupAddress(value);
     setPickupPlaceId(undefined);
-    setShowPickupDropdown(true);
 
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    if (value.trim().length >= 2) {
+    if (pickupDebounceTimer.current) clearTimeout(pickupDebounceTimer.current);
+    if (value.trim().length >= 1) {
+      setShowPickupDropdown(true);
       setIsSearchingPickup(true);
-      debounceTimer.current = setTimeout(async () => {
-        const results = await fetchPlacePredictions(value, placesSessionToken.current);
-        setPickupSuggestions(results);
-        setIsSearchingPickup(false);
-      }, 300);
+      pickupDebounceTimer.current = setTimeout(async () => {
+        try {
+          const results = await fetchPlacePredictions(value, placesSessionToken.current);
+          setPickupSuggestions(results);
+        } catch {
+          setPickupSuggestions([]);
+        } finally {
+          setIsSearchingPickup(false);
+        }
+      }, 200);
     } else {
       setPickupSuggestions([]);
+      setShowPickupDropdown(false);
       setIsSearchingPickup(false);
     }
   };
@@ -498,18 +505,24 @@ export const AdminDispatchModal: React.FC<Props> = ({
   const handleDropChange = (value: string) => {
     setDropAddress(value);
     setDropPlaceId(undefined);
-    setShowDropDropdown(true);
 
-    if (debounceTimer.current) clearTimeout(debounceTimer.current);
-    if (value.trim().length >= 2) {
+    if (dropDebounceTimer.current) clearTimeout(dropDebounceTimer.current);
+    if (value.trim().length >= 1) {
+      setShowDropDropdown(true);
       setIsSearchingDrop(true);
-      debounceTimer.current = setTimeout(async () => {
-        const results = await fetchPlacePredictions(value, placesSessionToken.current);
-        setDropSuggestions(results);
-        setIsSearchingDrop(false);
-      }, 300);
+      dropDebounceTimer.current = setTimeout(async () => {
+        try {
+          const results = await fetchPlacePredictions(value, placesSessionToken.current);
+          setDropSuggestions(results);
+        } catch {
+          setDropSuggestions([]);
+        } finally {
+          setIsSearchingDrop(false);
+        }
+      }, 200);
     } else {
       setDropSuggestions([]);
+      setShowDropDropdown(false);
       setIsSearchingDrop(false);
     }
   };

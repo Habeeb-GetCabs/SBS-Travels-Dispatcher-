@@ -323,10 +323,15 @@ export const createOpenTrip = async (
 
   const normalizedTariff = normalizeTariffConfig(tripData.tariffConfig);
 
-  // If Supabase is connected, enforce authenticated dispatcher session and database persistence
+  // If Supabase is connected, check session or master PIN bypass
   if (isSupabaseConfigured() && supabase) {
     const session = await getDispatcherSession();
-    if (!session || !session.user?.id) {
+    const isAdminPinAuth = typeof window !== 'undefined' && (
+      localStorage.getItem('sbs_admin_pin_authenticated') === 'true' ||
+      localStorage.getItem('sbs_admin_authenticated_profile') !== null
+    );
+
+    if (!session?.user?.id && !isAdminPinAuth) {
       return {
         success: false,
         error: 'Authentication Required: You must be logged in as an authorized Dispatcher to dispatch trips.',
@@ -1871,9 +1876,11 @@ export const saveLocalActivationCode = (driverId: string, deviceId: string, code
   try {
     const raw = localStorage.getItem('sbs_activation_codes_v2');
     const store = raw ? JSON.parse(raw) : {};
-    store[`${driverId}_${deviceId}`] = code;
-    store[deviceId] = code;
-    store[driverId] = code;
+    const cleanCode = code.trim();
+    store[cleanCode] = { driverId, deviceId, generatedAt: Date.now() };
+    if (driverId && deviceId) store[`${driverId}_${deviceId}`] = cleanCode;
+    if (deviceId) store[deviceId] = cleanCode;
+    if (driverId) store[driverId] = cleanCode;
     localStorage.setItem('sbs_activation_codes_v2', JSON.stringify(store));
   } catch {}
 };
@@ -1888,6 +1895,26 @@ export const getLocalActivationCode = (driverId: string, deviceId: string): stri
   } catch {
     return null;
   }
+};
+
+export const isLocalActivationCodeValid = (code: string, driverId?: string, deviceId?: string): boolean => {
+  const cleanCode = code.trim();
+  if (cleanCode === '2481' || cleanCode === '140423') return true;
+  if (typeof window === 'undefined') return false;
+
+  try {
+    const raw = localStorage.getItem('sbs_activation_codes_v2');
+    if (!raw) return false;
+    const store = JSON.parse(raw);
+    if (store[cleanCode]) return true;
+
+    for (const key in store) {
+      const val = store[key];
+      if (typeof val === 'string' && val.trim() === cleanCode) return true;
+      if (val && typeof val === 'object' && val.code === cleanCode) return true;
+    }
+  } catch {}
+  return false;
 };
 
 /**
@@ -1964,11 +1991,95 @@ export const activateDriverWithCode = async (
 
   const currentProfile = getStoredDriverProfile();
   const isMasterAdminPin = cleanCode === '2481' || cleanCode === '140423';
-  const localSavedCode = getLocalActivationCode(driverId, cleanDevice) || currentProfile.activationCode;
-  const isLocalMatch = isMasterAdminPin || (localSavedCode && localSavedCode === cleanCode);
+  const isLocalMatch = isMasterAdminPin || isLocalActivationCodeValid(cleanCode, driverId, cleanDevice);
 
   if (isSupabaseConfigured() && supabase) {
     try {
+      // 0a. Direct Global Search in Supabase Drivers table by Activation Code
+      const { data: codeMatchedDrivers } = await supabase
+        .from('drivers')
+        .select('*')
+        .eq('activation_code', cleanCode)
+        .limit(1);
+
+      if (codeMatchedDrivers && codeMatchedDrivers.length > 0) {
+        const dRow = codeMatchedDrivers[0];
+        await supabase
+          .from('drivers')
+          .update({
+            activation_status: 'ACTIVE',
+            operational_status: 'READY',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', dRow.id);
+
+        await supabase.from('driver_devices').upsert(
+          {
+            driver_id: dRow.id,
+            device_fingerprint: cleanDevice,
+            device_model: dRow.vehicle_model || 'Taxi Mobile',
+            app_version: '2.6',
+            status: 'ACTIVE',
+            last_seen_at: new Date().toISOString(),
+          },
+          { onConflict: 'driver_id,device_fingerprint' }
+        );
+
+        const updated: DriverProfile = {
+          ...currentProfile,
+          id: dRow.id,
+          driverCode: dRow.driver_code || currentProfile.driverCode,
+          name: dRow.name || currentProfile.name,
+          mobile: dRow.mobile || currentProfile.mobile,
+          vehicleNumber: dRow.vehicle_number || currentProfile.vehicleNumber,
+          activationStatus: 'ACTIVE',
+          operationalStatus: 'READY',
+          deviceId: cleanDevice,
+          isActivationCodeVerified: true,
+        };
+        saveDriverProfile(updated);
+        saveLocalRegisteredDriver(updated);
+        return { success: true };
+      }
+
+      // 0b. Direct Global Search in Supabase Driver Devices table by Activation Code
+      const { data: codeMatchedDevices } = await supabase
+        .from('driver_devices')
+        .select('*')
+        .eq('activation_code', cleanCode)
+        .limit(1);
+
+      if (codeMatchedDevices && codeMatchedDevices.length > 0) {
+        const devRow = codeMatchedDevices[0];
+        const targetDriverId = devRow.driver_id;
+
+        await supabase
+          .from('drivers')
+          .update({
+            activation_status: 'ACTIVE',
+            operational_status: 'READY',
+            updated_at: new Date().toISOString(),
+          })
+          .eq('id', targetDriverId);
+
+        await supabase
+          .from('driver_devices')
+          .update({ status: 'ACTIVE', last_seen_at: new Date().toISOString() })
+          .eq('id', devRow.id);
+
+        const updated: DriverProfile = {
+          ...currentProfile,
+          id: targetDriverId,
+          activationStatus: 'ACTIVE',
+          operationalStatus: 'READY',
+          deviceId: cleanDevice,
+          isActivationCodeVerified: true,
+        };
+        saveDriverProfile(updated);
+        saveLocalRegisteredDriver(updated);
+        return { success: true };
+      }
+
       // 1. Resolve Driver UUID in Supabase
       let driverUuid: string | null = isUuid(driverId) ? driverId : null;
       if (!driverUuid) {

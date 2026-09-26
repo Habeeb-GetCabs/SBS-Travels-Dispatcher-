@@ -195,40 +195,51 @@ export const createPlacesSessionToken = (): string => {
   });
 };
 
+// Helper for strict Promise timeout
+const withTimeout = <T>(promise: Promise<T>, ms = 1200): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error('Maps API Timeout')), ms)),
+  ]);
+};
+
 // Autocomplete using Google Places API & JS SDK AutocompleteService (Coimbatore Biased)
 export const fetchPlacePredictions = async (
   input: string,
   sessionToken: string
 ): Promise<PlaceSuggestion[]> => {
   const query = input.trim();
-  if (query.length < 2) return [];
+  if (query.length < 1) return [];
 
   const key = getStoredGoogleMapsKey();
   if (key) {
-    // Attempt 1: Standard Google Maps JS SDK AutocompleteService (Highest Reliability in Web Browsers)
+    // Attempt 1: Standard Google Maps JS SDK AutocompleteService (With 1.0s timeout)
     try {
-      const google = await loadGoogleMapsSDK(key);
+      const google = await withTimeout(loadGoogleMapsSDK(key), 1000);
       if (google?.maps?.places?.AutocompleteService) {
         const autoService = new google.maps.places.AutocompleteService();
-        const predictions = await new Promise<any[]>((resolve) => {
-          autoService.getPlacePredictions(
-            {
-              input: query,
-              componentRestrictions: { country: 'in' },
-              locationBias: new google.maps.LatLngBounds(
-                new google.maps.LatLng(10.8, 76.8), // Coimbatore S/W
-                new google.maps.LatLng(11.3, 77.3)  // Coimbatore N/E
-              ),
-            },
-            (results: any[], status: any) => {
-              if (status === google.maps.places.PlacesServiceStatus.OK && results) {
-                resolve(results);
-              } else {
-                resolve([]);
+        const predictions = await withTimeout(
+          new Promise<any[]>((resolve) => {
+            autoService.getPlacePredictions(
+              {
+                input: query,
+                componentRestrictions: { country: 'in' },
+                locationBias: new google.maps.LatLngBounds(
+                  new google.maps.LatLng(10.8, 76.8), // Coimbatore S/W
+                  new google.maps.LatLng(11.3, 77.3)  // Coimbatore N/E
+                ),
+              },
+              (results: any[], status: any) => {
+                if (status === google.maps.places.PlacesServiceStatus.OK && results) {
+                  resolve(results);
+                } else {
+                  resolve([]);
+                }
               }
-            }
-          );
-        });
+            );
+          }),
+          1200
+        );
 
         if (predictions && predictions.length > 0) {
           return predictions.map((p) => ({
@@ -245,24 +256,27 @@ export const fetchPlacePredictions = async (
 
     // Attempt 2: Server proxy endpoint
     try {
-      const response = await fetch('/api/gmaps/places/v1/places:autocomplete', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Goog-Api-Key': key,
-        },
-        body: JSON.stringify({
-          input: query,
-          sessionToken: sessionToken,
-          includedRegionCodes: ['in'],
-          locationBias: {
-            circle: {
-              center: { latitude: 11.0168, longitude: 76.9558 },
-              radius: 50000.0,
-            },
+      const response = await withTimeout(
+        fetch('/api/gmaps/places/v1/places:autocomplete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Goog-Api-Key': key,
           },
+          body: JSON.stringify({
+            input: query,
+            sessionToken: sessionToken,
+            includedRegionCodes: ['in'],
+            locationBias: {
+              circle: {
+                center: { latitude: 11.0168, longitude: 76.9558 },
+                radius: 50000.0,
+              },
+            },
+          }),
         }),
-      });
+        1200
+      );
 
       if (response.ok) {
         const data = await response.json();
@@ -292,19 +306,19 @@ export const fetchPlacePredictions = async (
       l.fullAddress.toLowerCase().includes(lower)
   );
 
-  if (matched.length > 0) {
-    return matched;
+  const results = [...matched];
+  if (!results.some((r) => r.primaryText.toLowerCase() === lower)) {
+    results.unshift({
+      placeId: `custom-${Date.now()}`,
+      primaryText: `${query}, Coimbatore`,
+      secondaryText: 'Coimbatore Location',
+      fullAddress: `${query}, Coimbatore, Tamil Nadu, India`,
+      latitude: 11.0168,
+      longitude: 76.9558,
+    });
   }
 
-  // Provide dynamic suggestion for custom input
-  return [
-    {
-      placeId: `custom-${Date.now()}`,
-      primaryText: query,
-      secondaryText: 'Coimbatore Location',
-      fullAddress: query,
-    },
-  ];
+  return results;
 };
 
 // Fetch Place Details (New Places API)
