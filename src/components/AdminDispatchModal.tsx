@@ -1871,6 +1871,18 @@ export const AdminDispatchModal: React.FC<Props> = ({
                   <div className="flex items-center space-x-2">
                     <button
                       type="button"
+                      onClick={async () => {
+                        const list = await fetchDriversForDispatch();
+                        if (list) setFleetDrivers(list);
+                      }}
+                      className="px-2.5 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-bold transition flex items-center space-x-1 active:scale-95 shadow-sm"
+                      title="Refresh Live Fleet Driver Status"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Refresh</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setShowKeyGeneratorPanel(!showKeyGeneratorPanel)}
                       className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 rounded-xl text-xs font-black transition flex items-center space-x-1.5 shadow-md active:scale-95"
                     >
