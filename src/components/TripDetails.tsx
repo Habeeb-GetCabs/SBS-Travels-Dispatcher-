@@ -12,9 +12,12 @@ import {
   Check,
   KeyRound,
   Shield,
-  AlertCircle
+  AlertCircle,
+  X,
+  RotateCcw,
+  LogOut,
 } from 'lucide-react';
-import { markTripArrived, startTripWithPin, verifyPassengerOtp } from '../services/tripService';
+import { markTripArrived, startTripWithPin, verifyPassengerOtp, releaseTripByDriver } from '../services/tripService';
 import { soundEngine } from '../services/audioService';
 
 interface Props {
@@ -50,6 +53,31 @@ export const TripDetails: React.FC<Props> = ({ trip, driver, onTripStarted, onCa
 
   const isPassengerVerified = !trip.passengerOtpRequired || passengerStatus === 'VERIFIED';
   const isArrived = arrivedSuccess || trip.status === 'ARRIVED';
+
+  // Cancel / Release Trip State
+  const [showCancelConfirmModal, setShowCancelConfirmModal] = useState<boolean>(false);
+  const [cancelReason, setCancelReason] = useState<string>('Driver unable to fulfill trip');
+  const [isCancelling, setIsCancelling] = useState<boolean>(false);
+
+  const handleExecuteReleaseTrip = async () => {
+    setIsCancelling(true);
+    try {
+      const res = await releaseTripByDriver(trip.id, driver, cancelReason);
+      if (res.success) {
+        soundEngine.triggerHaptic([100, 50, 100]);
+        if (onCancelClaim) {
+          onCancelClaim();
+        }
+      } else {
+        alert(res.error || 'Failed to cancel trip.');
+      }
+    } catch (err: any) {
+      alert(err?.message || 'Error cancelling trip.');
+    } finally {
+      setIsCancelling(false);
+      setShowCancelConfirmModal(false);
+    }
+  };
 
   const handleCallCustomer = () => {
     if (trip.customerMobile) {
@@ -387,6 +415,18 @@ export const TripDetails: React.FC<Props> = ({ trip, driver, onTripStarted, onCa
         </div>
       )}
 
+      {/* CANCEL / RETURN TRIP TO AVAILABLE TRIPS BUTTON */}
+      <div className="pt-2">
+        <button
+          type="button"
+          onClick={() => setShowCancelConfirmModal(true)}
+          className="w-full py-3.5 px-4 rounded-2xl border border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 hover:text-rose-300 font-extrabold text-xs flex items-center justify-center space-x-2 transition active:scale-95 shadow-sm"
+        >
+          <RotateCcw className="w-4 h-4 text-rose-400" />
+          <span>CANCEL / RETURN TRIP TO AVAILABLE TRIPS</span>
+        </button>
+      </div>
+
       {/* Start Meter PIN Verification Modal (Server-Authoritative Validation) */}
       {showPinModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
@@ -441,6 +481,66 @@ export const TripDetails: React.FC<Props> = ({ trip, driver, onTripStarted, onCa
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel Confirmation Modal */}
+      {showCancelConfirmModal && (
+        <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in-95 duration-200 text-slate-100">
+            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+              <div className="flex items-center space-x-2 text-rose-400">
+                <RotateCcw className="w-5 h-5" />
+                <h3 className="text-base font-bold text-white">Cancel & Return Trip?</h3>
+              </div>
+              <button
+                onClick={() => setShowCancelConfirmModal(false)}
+                className="w-7 h-7 rounded-full bg-slate-800 text-slate-400 hover:text-white flex items-center justify-center text-xs font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Are you sure you want to cancel this trip <strong>{trip.tripNumber}</strong>?
+              It will be unassigned from your profile and returned to <strong>Available Trips</strong> for all drivers to claim.
+            </p>
+
+            <div className="space-y-1.5">
+              <label className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">
+                Reason for Cancellation
+              </label>
+              <select
+                value={cancelReason}
+                onChange={(e) => setCancelReason(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-medium focus:outline-none focus:border-rose-500"
+              >
+                <option value="Driver unable to fulfill trip">Driver unable to fulfill trip</option>
+                <option value="Vehicle issue / Breakdown">Vehicle issue / Breakdown</option>
+                <option value="Customer unreachable">Customer unreachable</option>
+                <option value="Customer requested cancellation">Customer requested cancellation</option>
+                <option value="Personal emergency">Personal emergency</option>
+              </select>
+            </div>
+
+            <div className="pt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCancelConfirmModal(false)}
+                className="py-3 px-4 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-bold text-xs uppercase transition"
+              >
+                Keep Trip
+              </button>
+              <button
+                type="button"
+                disabled={isCancelling}
+                onClick={handleExecuteReleaseTrip}
+                className="py-3 px-4 rounded-xl bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white font-extrabold text-xs uppercase shadow-lg shadow-rose-600/30 transition flex items-center justify-center space-x-1"
+              >
+                <span>{isCancelling ? 'Cancelling...' : 'Yes, Return Trip'}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}

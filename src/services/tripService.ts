@@ -2544,3 +2544,173 @@ export const getTripStartPin = async (tripId: string): Promise<string | null> =>
   }
   return null;
 };
+
+/**
+ * Release / Cancel an active or claimed trip by driver and return it to Available Trips.
+ */
+export const releaseTripByDriver = async (
+  tripId: string,
+  driver: DriverProfile,
+  reason?: string
+): Promise<{ success: boolean; error?: string }> => {
+  const now = new Date().toISOString();
+
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      // 1. Update trip status back to 'OPEN' and clear driver assignments
+      const { error: tripError } = await supabase
+        .from('trips')
+        .update({
+          status: 'OPEN',
+          claimed_by_driver_id: null,
+          claimed_at: null,
+          driver_name: null,
+          driver_mobile: null,
+          driver_vehicle_number: null,
+          updated_at: now,
+          notes: reason ? `Returned to available trips by driver: ${reason}` : 'Returned to available trips by driver',
+        })
+        .eq('id', tripId);
+
+      if (tripError) {
+        console.warn('Supabase releaseTripByDriver trip error:', tripError);
+      }
+
+      // 2. Update driver operational status back to 'READY'
+      if (driver.id && !driver.id.startsWith('drv-')) {
+        await supabase
+          .from('drivers')
+          .update({
+            operational_status: 'READY',
+            updated_at: now,
+          })
+          .eq('id', driver.id);
+      }
+    } catch (e: any) {
+      console.warn('Supabase releaseTripByDriver exception:', e);
+    }
+  }
+
+  // 3. Update local storage trips array
+  const localTrips = getLocalTrips();
+  const updatedLocal = localTrips.map((t) => {
+    if (t.id === tripId) {
+      return {
+        ...t,
+        status: 'OPEN' as const,
+        claimedByDriverId: undefined,
+        claimedAt: undefined,
+        driverName: undefined,
+        driverMobile: undefined,
+        driverVehicleNumber: undefined,
+        notes: reason ? `Returned: ${reason}` : undefined,
+      };
+    }
+    return t;
+  });
+  saveLocalTrips(updatedLocal);
+
+  // 4. Clear active trip and meter snapshot
+  clearActiveMeterSnapshot(tripId);
+  const active = getActiveTrip();
+  if (active && active.id === tripId) {
+    setActiveTrip(null);
+  }
+
+  return { success: true };
+};
+
+/**
+ * Restore an existing driver profile and activation status by Mobile Number or Driver Code
+ */
+export const restoreDriverProfileByMobileOrCode = async (
+  query: string
+): Promise<{ success: boolean; driver?: DriverProfile; error?: string }> => {
+  const cleanQuery = query.trim().toUpperCase();
+  if (!cleanQuery) {
+    return { success: false, error: 'Please enter registered Mobile Number or Driver Code.' };
+  }
+
+  const currentDeviceId = getOrCreateDeviceId();
+
+  if (isSupabaseConfigured() && supabase) {
+    try {
+      // Query drivers table by mobile OR driver_code OR id
+      const { data, error } = await supabase
+        .from('drivers')
+        .select('*, driver_devices(*)')
+        .or(`mobile.eq.${cleanQuery},driver_code.eq.${cleanQuery},id.eq.${query.trim()}`)
+        .limit(1);
+
+      if (error) {
+        console.warn('restoreDriverProfile error:', error);
+      }
+
+      if (data && data.length > 0) {
+        const d = data[0];
+
+        // Find if any device associated with this driver is ACTIVE or check driver's activation_status
+        const activeDevice = Array.isArray(d.driver_devices)
+          ? d.driver_devices.find((dev: any) => dev.status === 'ACTIVE')
+          : null;
+
+        const isActivated = d.activation_status === 'ACTIVE' || !!activeDevice;
+
+        // Upsert this device ID so driver is bound to current device
+        try {
+          await supabase.from('driver_devices').upsert(
+            {
+              driver_id: d.id,
+              device_fingerprint: currentDeviceId,
+              device_model: d.vehicle_model || 'Taxi',
+              app_version: '2.6',
+              status: isActivated ? 'ACTIVE' : (d.activation_status || 'PENDING'),
+              last_seen_at: new Date().toISOString(),
+            },
+            { onConflict: 'driver_id,device_fingerprint' }
+          );
+        } catch (e) {
+          console.warn('Upsert device on restore error:', e);
+        }
+
+        const restoredProfile: DriverProfile = {
+          id: d.id,
+          authUserId: d.auth_user_id,
+          driverCode: d.driver_code || 'DRV0051',
+          name: d.name,
+          mobile: d.mobile,
+          vehicleNumber: d.vehicle_number,
+          vehicleModel: d.vehicle_model || 'Maruti Tour S',
+          homeLocation: d.home_location || 'Coimbatore',
+          photoUrl: d.photo_url || '',
+          operationalStatus: d.operational_status || 'READY',
+          activationStatus: isActivated ? 'ACTIVE' : (d.activation_status || 'PENDING'),
+          deviceId: currentDeviceId,
+        };
+
+        saveDriverProfile(restoredProfile);
+        return { success: true, driver: restoredProfile };
+      }
+    } catch (e: any) {
+      console.warn('restoreDriverProfile exception:', e);
+    }
+  }
+
+  // Local storage lookup fallback
+  const localProf = getStoredDriverProfile();
+  if (
+    localProf &&
+    (localProf.mobile.includes(query.trim()) ||
+      localProf.driverCode.toUpperCase() === cleanQuery ||
+      localProf.id === query.trim())
+  ) {
+    saveDriverProfile(localProf);
+    return { success: true, driver: localProf };
+  }
+
+  return {
+    success: false,
+    error: `No driver profile found matching "${query}". Please check the phone number or driver code.`,
+  };
+};
+

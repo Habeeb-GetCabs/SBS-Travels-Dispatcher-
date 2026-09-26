@@ -61,6 +61,8 @@ import {
   activateDriverWithCode,
   getOrCreateDeviceId,
   adminUpdateDriverProfile,
+  releaseTripByDriver,
+  restoreDriverProfileByMobileOrCode,
 } from './services/tripService';
 import { AdminDispatchModal } from './components/AdminDispatchModal';
 import { TripDetails } from './components/TripDetails';
@@ -127,6 +129,12 @@ export default function App() {
   const [isSubmittingSignup, setIsSubmittingSignup] = useState<boolean>(false);
   const [signupError, setSignupError] = useState<string | null>(null);
   const [signupSuccess, setSignupSuccess] = useState<string | null>(null);
+
+  // Restore Existing Profile State
+  const [restoreQuery, setRestoreQuery] = useState<string>('');
+  const [isRestoringProfile, setIsRestoringProfile] = useState<boolean>(false);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [restoreSuccess, setRestoreSuccess] = useState<string | null>(null);
 
   // Mandatory Background Permissions State
   const [locationGranted, setLocationGranted] = useState<boolean>(false);
@@ -387,6 +395,51 @@ export default function App() {
     }
   };
 
+  const handleRestoreProfile = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!restoreQuery.trim()) return;
+
+    setIsRestoringProfile(true);
+    setRestoreError(null);
+    setRestoreSuccess(null);
+
+    try {
+      const res = await restoreDriverProfileByMobileOrCode(restoreQuery);
+      if (res.success && res.driver) {
+        setDriver(res.driver);
+        saveDriverProfile(res.driver);
+        soundEngine.playClaimSuccess();
+
+        if (res.driver.activationStatus === 'ACTIVE') {
+          setRestoreSuccess(`Welcome back ${res.driver.name}! Profile & Activation restored.`);
+          setTimeout(() => {
+            setShowDriverOnboardModal(false);
+          }, 1200);
+        } else {
+          setRestoreSuccess(`Profile restored for ${res.driver.name}! Please enter Activation Code in Tab 3.`);
+          setOnboardTab('activate');
+        }
+      } else {
+        setRestoreError(res.error || 'No driver profile found matching query.');
+      }
+    } catch (err: any) {
+      setRestoreError(err?.message || 'Error restoring driver profile.');
+    } finally {
+      setIsRestoringProfile(false);
+    }
+  };
+
+  const handleCancelTripClaim = async () => {
+    if (activeTrip) {
+      await releaseTripByDriver(activeTrip.id, driver, 'Cancelled by driver');
+    }
+    setActiveTrip(null);
+    setActiveTripState(null);
+    soundEngine.triggerHaptic([100, 50, 100]);
+    setBroadcastAlertNotice('Trip returned to Available Trips.');
+    setTimeout(() => setBroadcastAlertNotice(null), 4000);
+  };
+
   const handleOnboardingSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSubmittingSignup(true);
@@ -406,10 +459,18 @@ export default function App() {
       if (res.success && res.driver) {
         setDriver(res.driver);
         saveDriverProfile(res.driver);
-        setSignupSuccess(
-          `Profile saved as ${res.driver.driverCode}! Next, enable mandatory background permissions.`
-        );
-        setOnboardTab('permissions');
+
+        if (res.driver.activationStatus === 'ACTIVE') {
+          setSignupSuccess(
+            `Profile restored for ${res.driver.name}! Your account is ACTIVE. Redirecting...`
+          );
+          setTimeout(() => setShowDriverOnboardModal(false), 1200);
+        } else {
+          setSignupSuccess(
+            `Profile saved as ${res.driver.driverCode}! Next, enable mandatory background permissions.`
+          );
+          setOnboardTab('permissions');
+        }
       } else {
         setSignupError(res.error || 'Failed to submit driver registration.');
       }
@@ -1016,10 +1077,7 @@ export default function App() {
             trip={activeTrip}
             driver={driver}
             onTripStarted={handleTripStarted}
-            onCancelClaim={() => {
-              setActiveTrip(null);
-              setActiveTripState(null);
-            }}
+            onCancelClaim={handleCancelTripClaim}
           />
         )}
 
@@ -2116,7 +2174,55 @@ export default function App() {
 
             {/* TAB 1: MANDATORY DRIVER PROFILE SETTINGS */}
             {onboardTab === 'signup' && (
-              <form onSubmit={handleOnboardingSubmit} className="space-y-3 text-xs">
+              <div className="space-y-3 text-xs">
+                {/* QUICK RESTORE EXISTING DRIVER PROFILE SECTION */}
+                <div className="p-3.5 rounded-2xl bg-gradient-to-r from-sky-950/90 to-slate-900 border border-sky-500/40 space-y-2 shadow-md">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-sky-300 flex items-center space-x-1.5 uppercase tracking-wider">
+                      <RefreshCw className="w-3.5 h-3.5 text-sky-400" />
+                      <span>Already Registered? Restore Profile</span>
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-300 leading-relaxed">
+                    If app cache was cleared, enter your registered Mobile Number or Driver Code (e.g. 9876543210 or DRV0051) to instantly recover your profile:
+                  </p>
+                  <form onSubmit={handleRestoreProfile} className="flex space-x-2 pt-0.5">
+                    <input
+                      type="text"
+                      value={restoreQuery}
+                      onChange={(e) => setRestoreQuery(e.target.value)}
+                      placeholder="Registered Mobile / Driver Code"
+                      className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white font-mono text-xs focus:outline-none focus:border-sky-400"
+                    />
+                    <button
+                      type="submit"
+                      disabled={isRestoringProfile || !restoreQuery.trim()}
+                      className="px-3 py-2 bg-sky-600 hover:bg-sky-500 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition shrink-0 active:scale-95 shadow"
+                    >
+                      {isRestoringProfile ? 'Restoring...' : 'Restore'}
+                    </button>
+                  </form>
+                  {restoreError && (
+                    <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/30 text-rose-400 text-[10px] font-bold flex items-center space-x-1">
+                      <AlertCircle className="w-3 h-3 shrink-0" />
+                      <span>{restoreError}</span>
+                    </div>
+                  )}
+                  {restoreSuccess && (
+                    <div className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-[10px] font-bold flex items-center space-x-1">
+                      <CheckCircle2 className="w-3 h-3 shrink-0" />
+                      <span>{restoreSuccess}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="relative flex py-1 items-center">
+                  <div className="flex-grow border-t border-slate-800"></div>
+                  <span className="flex-shrink mx-2 text-[10px] font-bold text-slate-500 uppercase tracking-wider">OR NEW DRIVER REGISTRATION</span>
+                  <div className="flex-grow border-t border-slate-800"></div>
+                </div>
+
+                <form onSubmit={handleOnboardingSubmit} className="space-y-3 text-xs">
                 {/* Photo Upload from Gallery (Not Camera forced) */}
                 <div className="space-y-1.5 p-3 rounded-2xl bg-slate-900/80 border border-slate-800">
                   <div className="flex items-center justify-between">
@@ -2303,7 +2409,8 @@ export default function App() {
                   )}
                 </button>
               </form>
-            )}
+            </div>
+          )}
 
             {/* TAB 2: MANDATORY BACKGROUND PERMISSIONS */}
             {onboardTab === 'permissions' && (
