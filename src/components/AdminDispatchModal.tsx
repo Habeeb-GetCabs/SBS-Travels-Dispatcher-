@@ -2699,6 +2699,83 @@ export const AdminDispatchModal: React.FC<Props> = ({
                   </select>
                 </div>
 
+                {/* Supabase Cloud Database Status & Configuration Card */}
+                <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <Database className="w-4 h-4 text-sky-400" />
+                      <span className="font-bold text-xs text-white uppercase tracking-wider">
+                        Supabase Cloud Database Status
+                      </span>
+                    </div>
+                    {isSupabaseConfigured() ? (
+                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 font-extrabold text-[10px] uppercase">
+                        ✓ Connected
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-300 font-extrabold text-[10px] uppercase">
+                        Local Mode (Cloud Sync Pending)
+                      </span>
+                    )}
+                  </div>
+
+                  {!isSupabaseConfigured() && (
+                    <div className="pt-1 space-y-2">
+                      <div className="flex items-center justify-between text-[10px]">
+                        <p className="text-slate-300">
+                          Connect your Supabase PostgreSQL database to sync registered drivers &amp; trips across multiple phones live:
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => setShowSupabaseSetup(!showSupabaseSetup)}
+                          className="px-2 py-1 bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/40 rounded-lg font-bold text-[10px] uppercase shrink-0 transition"
+                        >
+                          {showSupabaseSetup ? 'Hide Config' : 'Configure Supabase Keys'}
+                        </button>
+                      </div>
+
+                      {showSupabaseSetup && (
+                        <form onSubmit={handleSaveSupabaseSettings} className="p-3 bg-slate-900 rounded-xl border border-sky-500/30 space-y-2">
+                          <div>
+                            <label className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">
+                              Supabase Project URL
+                            </label>
+                            <input
+                              type="url"
+                              required
+                              value={inputSupabaseUrl}
+                              onChange={(e) => setInputSupabaseUrl(e.target.value)}
+                              placeholder="https://your-project.supabase.co"
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-sky-400"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[10px] text-slate-400 font-bold uppercase block mb-0.5">
+                              Supabase Anon Public Key
+                            </label>
+                            <input
+                              type="password"
+                              required
+                              value={inputSupabaseKey}
+                              onChange={(e) => setInputSupabaseKey(e.target.value)}
+                              placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+                              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-sky-400"
+                            />
+                          </div>
+
+                          <button
+                            type="submit"
+                            className="w-full py-2 bg-gradient-to-r from-sky-600 to-indigo-600 hover:from-sky-500 hover:to-indigo-500 text-white font-extrabold text-xs rounded-lg uppercase tracking-wider shadow transition"
+                          >
+                            Save &amp; Connect Supabase Cloud
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </div>
+
                 {/* Explicit Device-Provisioning Form */}
                 <form onSubmit={handleRegisterDevice} className="bg-slate-950 p-4 rounded-2xl border border-sky-800/40 space-y-3">
                   <div className="flex items-center space-x-2 text-sky-400 font-bold text-xs uppercase mb-1">
