@@ -990,7 +990,7 @@ export default function App() {
 
             <div className="pt-4 border-t border-slate-800/80 space-y-3">
               <div className="text-center text-[10px] text-slate-500 font-semibold">
-                SBS Travels Driver App v2.4 (Device ID Auth)
+                SBS Travels Driver App v2.5.0 (Key Generator & Updated Logo)
               </div>
             </div>
           </div>

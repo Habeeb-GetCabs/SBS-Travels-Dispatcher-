@@ -216,16 +216,13 @@ export const AdminDispatchModal: React.FC<Props> = ({
   const [driverStatusFilter, setDriverStatusFilter] = useState<string>('ALL');
   const [selectedPickupTripId, setSelectedPickupTripId] = useState<string>('AUTO');
 
-  // Driver Provisioning State (Phase 2.3.4)
-  const [showProvisionModal, setShowProvisionModal] = useState<boolean>(false);
-  const [newDriverName, setNewDriverName] = useState<string>('');
-  const [newDriverMobile, setNewDriverMobile] = useState<string>('');
-  const [newDriverCode, setNewDriverCode] = useState<string>('');
-  const [newDriverVehNo, setNewDriverVehNo] = useState<string>('');
-  const [newDriverVehModel, setNewDriverVehModel] = useState<string>('Sedan');
-  const [isProvisioning, setIsProvisioning] = useState<boolean>(false);
-  const [provisionError, setProvisionError] = useState<string | null>(null);
-  const [provisionSuccess, setProvisionSuccess] = useState<string | null>(null);
+  // Fleet Monitor Activation Key Generator State
+  const [showKeyGeneratorPanel, setShowKeyGeneratorPanel] = useState<boolean>(true);
+  const [keyGenDriverId, setKeyGenDriverId] = useState<string>('ALL');
+  const [keyGenCustomDevId, setKeyGenCustomDevId] = useState<string>('');
+  const [keyGenOutputCode, setKeyGenOutputCode] = useState<string | null>(null);
+  const [keyGenIsGenerating, setKeyGenIsGenerating] = useState<boolean>(false);
+  const [keyGenError, setKeyGenError] = useState<string | null>(null);
 
   // Tab 5: Device security states
   const [selectedDriverId, setSelectedDriverId] = useState<string>(driver.id);
@@ -290,59 +287,23 @@ export const AdminDispatchModal: React.FC<Props> = ({
 
   const handleBindDriverAuth = async (driverCode: string) => {
     setIsBindingDriverCode(driverCode);
-    setProvisionError(null);
-    setProvisionSuccess(null);
+    setDeviceError(null);
+    setDeviceSuccess(null);
     try {
       const res = await bindDriverAuthAccount(driverCode, 'SbsTravels@2026!');
       if (res.success) {
-        setProvisionSuccess(
+        setDeviceSuccess(
           `Driver ${driverCode} successfully linked! Login: ${res.email || `${driverCode.toLowerCase()}@sbstravels.com`} | Password: SbsTravels@2026!`
         );
         const updatedList = await fetchDriversForDispatch();
         if (updatedList) setFleetDrivers(updatedList);
       } else {
-        setProvisionError(res.error || `Failed to bind auth for ${driverCode}.`);
+        setDeviceError(res.error || `Failed to bind auth for ${driverCode}.`);
       }
     } catch (err: any) {
-      setProvisionError(err?.message || `Error binding auth for ${driverCode}.`);
+      setDeviceError(err?.message || `Error binding auth for ${driverCode}.`);
     } finally {
       setIsBindingDriverCode(null);
-    }
-  };
-
-  const handleProvisionDriverSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setProvisionError(null);
-    setProvisionSuccess(null);
-    setIsProvisioning(true);
-
-    const res = await createDriverAccount({
-      name: newDriverName,
-      mobile: newDriverMobile,
-      driverCode: newDriverCode,
-      vehicleNumber: newDriverVehNo,
-      vehicleModel: newDriverVehModel,
-      operationalStatus: 'OFFLINE',
-      activationStatus: 'ACTIVE',
-    });
-
-    setIsProvisioning(false);
-    if (!res.success) {
-      setProvisionError(res.error || 'Failed to provision driver account.');
-    } else {
-      const loginEmail = res.loginEmail || `${res.driver?.driverCode.toLowerCase()}@sbstravels.com`;
-      const loginPassword = res.loginPassword || 'SbsTravels@2026!';
-      setProvisionSuccess(
-        `Driver ${res.driver?.name} (${res.driver?.driverCode}) provisioned & linked successfully! Login: ${loginEmail} | Password: ${loginPassword}`
-      );
-      setNewDriverName('');
-      setNewDriverMobile('');
-      setNewDriverCode('');
-      setNewDriverVehNo('');
-      setNewDriverVehModel('Sedan');
-      fetchDriversForDispatch().then((list) => {
-        if (list) setFleetDrivers(list);
-      });
     }
   };
 
@@ -1903,11 +1864,11 @@ export const AdminDispatchModal: React.FC<Props> = ({
                   <div className="flex items-center space-x-2">
                     <button
                       type="button"
-                      onClick={() => setShowProvisionModal(!showProvisionModal)}
-                      className="px-2.5 py-1 bg-sky-600 hover:bg-sky-500 text-white rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                      onClick={() => setShowKeyGeneratorPanel(!showKeyGeneratorPanel)}
+                      className="px-3 py-1.5 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 rounded-xl text-xs font-black transition flex items-center space-x-1.5 shadow-md active:scale-95"
                     >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>{showProvisionModal ? 'Close Form' : '+ Provision Driver'}</span>
+                      <Key className="w-4 h-4 text-slate-950" />
+                      <span>{showKeyGeneratorPanel ? 'Close Generator' : '🔑 Key Generator'}</span>
                     </button>
                     <span className="px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[11px] font-bold flex items-center space-x-1.5">
                       <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
@@ -1923,106 +1884,150 @@ export const AdminDispatchModal: React.FC<Props> = ({
                   </div>
                 )}
 
-                {/* Provision Driver Form Panel (Phase 2.3.4) */}
-                {showProvisionModal && (
-                  <form onSubmit={handleProvisionDriverSubmit} className="bg-slate-950 p-4 rounded-2xl border border-sky-800/80 space-y-3">
-                    <div className="flex items-center justify-between pb-2 border-b border-slate-900">
-                      <div className="flex items-center space-x-2 text-sky-400 font-bold text-xs uppercase">
-                        <UserPlus className="w-4 h-4" />
-                        <span>Provision New Driver Account</span>
+                {/* Activation Key Generator Panel */}
+                {showKeyGeneratorPanel && (
+                  <div className="bg-gradient-to-b from-slate-950 via-slate-900 to-slate-950 p-4 rounded-2xl border-2 border-amber-500/40 shadow-xl space-y-3.5">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-800">
+                      <div className="flex items-center space-x-2">
+                        <div className="p-1.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                          <Key className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-black text-amber-400 uppercase tracking-wider">Device Activation Key Generator</h4>
+                          <p className="text-[10px] text-slate-400">Generate 6-digit cryptographic verification keys for driver device onboarding</p>
+                        </div>
                       </div>
                       <button
                         type="button"
-                        onClick={() => setShowProvisionModal(false)}
+                        onClick={() => setShowKeyGeneratorPanel(false)}
                         className="text-slate-400 hover:text-white text-xs font-bold"
                       >
                         ✕ Close
                       </button>
                     </div>
 
-                    {provisionError && (
+                    {keyGenError && (
                       <div className="bg-rose-950/80 text-rose-300 border border-rose-800 p-2 rounded-xl text-xs flex items-center space-x-1.5">
                         <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                        <span>{provisionError}</span>
+                        <span>{keyGenError}</span>
                       </div>
                     )}
 
-                    {provisionSuccess && (
-                      <div className="bg-emerald-950/80 text-emerald-300 border border-emerald-800 p-2 rounded-xl text-xs flex items-center space-x-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                        <span>{provisionSuccess}</span>
-                      </div>
-                    )}
-
-                    <div className="grid grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
-                        <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Driver Name *</label>
+                        <label className="text-[10px] text-slate-300 font-bold uppercase block mb-1">Select Target Fleet Driver *</label>
+                        <select
+                          value={keyGenDriverId}
+                          onChange={(e) => {
+                            const selectedId = e.target.value;
+                            setKeyGenDriverId(selectedId);
+                            setKeyGenError(null);
+                            if (selectedId !== 'ALL') {
+                              const targetD = allDriversList.find((d) => d.id === selectedId);
+                              if (targetD && targetD.deviceId) {
+                                setKeyGenCustomDevId(targetD.deviceId);
+                              }
+                            }
+                          }}
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-bold focus:outline-none focus:border-amber-400"
+                        >
+                          <option value="ALL">🌐 Standalone / Open Driver Activation Key</option>
+                          {allDriversList.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              [{d.driverCode}] {d.name} ({d.mobile}) • {d.vehicleNumber}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="text-[10px] text-slate-300 font-bold uppercase block mb-1">Target Device Fingerprint / ID</label>
                         <input
                           type="text"
-                          required
-                          value={newDriverName}
-                          onChange={(e) => setNewDriverName(e.target.value)}
-                          placeholder="e.g. Ramesh Kumar"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Mobile Number *</label>
-                        <input
-                          type="tel"
-                          required
-                          value={newDriverMobile}
-                          onChange={(e) => setNewDriverMobile(e.target.value)}
-                          placeholder="e.g. 9840122481"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
+                          value={keyGenCustomDevId}
+                          onChange={(e) => setKeyGenCustomDevId(e.target.value)}
+                          placeholder="Auto-detected or enter device fingerprint"
+                          className="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white font-mono placeholder:text-slate-600 focus:outline-none focus:border-amber-400"
                         />
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2">
-                      <div>
-                        <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Driver Code *</label>
-                        <input
-                          type="text"
-                          required
-                          value={newDriverCode}
-                          onChange={(e) => setNewDriverCode(e.target.value)}
-                          placeholder="e.g. DRV-102"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500 font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Vehicle No. *</label>
-                        <input
-                          type="text"
-                          required
-                          value={newDriverVehNo}
-                          onChange={(e) => setNewDriverVehNo(e.target.value)}
-                          placeholder="e.g. TN 37 AB 1234"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500 font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-slate-400 font-bold uppercase block mb-1">Vehicle Model</label>
-                        <input
-                          type="text"
-                          value={newDriverVehModel}
-                          onChange={(e) => setNewDriverVehModel(e.target.value)}
-                          placeholder="e.g. Dzire / Etios"
-                          className="w-full bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-sky-500"
-                        />
-                      </div>
+                    <div className="flex items-center space-x-2">
+                      <button
+                        type="button"
+                        disabled={keyGenIsGenerating}
+                        onClick={async () => {
+                          setKeyGenIsGenerating(true);
+                          setKeyGenError(null);
+                          setKeyGenOutputCode(null);
+                          try {
+                            const targetDriver = allDriversList.find((d) => d.id === keyGenDriverId) || driver;
+                            const devId = keyGenCustomDevId.trim() || targetDriver.deviceId || `dev_${Math.random().toString(36).slice(2, 8)}`;
+
+                            const res = await generateActivationCodeForDevice(targetDriver.id, devId);
+                            if (res.success && res.activationCode) {
+                              setKeyGenOutputCode(res.activationCode);
+                              setGeneratedActivationCodes((prev) => ({ ...prev, [targetDriver.id]: res.activationCode! }));
+                              fetchDriversForDispatch().then((list) => {
+                                if (list) setFleetDrivers(list);
+                              });
+                            } else {
+                              setKeyGenError(res.error || 'Failed to generate activation code.');
+                            }
+                          } catch (e: any) {
+                            setKeyGenError(e?.message || 'Error generating key.');
+                          } finally {
+                            setKeyGenIsGenerating(false);
+                          }
+                        }}
+                        className="flex-1 py-2.5 bg-gradient-to-r from-amber-500 via-yellow-500 to-amber-500 hover:from-amber-400 hover:to-yellow-400 text-slate-950 font-black rounded-xl text-xs transition shadow-lg shadow-amber-500/20 flex items-center justify-center space-x-2 active:scale-98"
+                      >
+                        <Key className="w-4 h-4 text-slate-950" />
+                        <span>{keyGenIsGenerating ? 'Generating Key...' : '⚡ Generate 6-Digit Activation Key'}</span>
+                      </button>
                     </div>
 
-                    <button
-                      type="submit"
-                      disabled={isProvisioning}
-                      className="w-full py-2 bg-sky-600 hover:bg-sky-500 disabled:bg-slate-800 text-white font-bold rounded-xl text-xs transition shadow flex items-center justify-center space-x-1"
-                    >
-                      <UserPlus className="w-3.5 h-3.5" />
-                      <span>{isProvisioning ? 'Provisioning Account...' : 'Provision Driver Account'}</span>
-                    </button>
-                  </form>
+                    {/* Generated Output Result Display */}
+                    {keyGenOutputCode && (
+                      <div className="p-3 bg-slate-950 rounded-xl border border-amber-400/50 space-y-2 animate-in zoom-in-95">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold text-amber-400 uppercase tracking-widest">Active Generated Key:</span>
+                          <span className="text-[10px] text-emerald-400 font-mono font-bold">Status: AUTHORIZED</span>
+                        </div>
+                        <div className="flex items-center justify-between bg-slate-900 px-4 py-2 rounded-xl border border-amber-500/30">
+                          <span className="text-2xl font-mono font-black tracking-[0.25em] text-amber-300">
+                            {keyGenOutputCode}
+                          </span>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                navigator.clipboard.writeText(keyGenOutputCode);
+                                setCopiedCodeNotice(`Copied Key: ${keyGenOutputCode}`);
+                                setTimeout(() => setCopiedCodeNotice(null), 2500);
+                              }}
+                              className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold rounded-lg text-xs flex items-center space-x-1 border border-slate-700 transition"
+                            >
+                              <Copy className="w-3.5 h-3.5 text-amber-400" />
+                              <span>Copy Key</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const targetD = allDriversList.find((d) => d.id === keyGenDriverId) || driver;
+                                const msg = `SBS Travels Activation Key: Hello ${targetD.name}, your 6-digit Device Activation Key is: *${keyGenOutputCode}*. Please enter this code in your SBS Driver App to activate your mobile device.`;
+                                openWhatsApp(targetD.mobile, msg);
+                              }}
+                              className="px-3 py-1 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-lg text-xs flex items-center space-x-1 shadow transition"
+                            >
+                              <MessageSquare className="w-3.5 h-3.5 text-white" />
+                              <span>WhatsApp to Driver</span>
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 )}
 
                 {/* Search, Filter & Pickup Reference Bar */}
