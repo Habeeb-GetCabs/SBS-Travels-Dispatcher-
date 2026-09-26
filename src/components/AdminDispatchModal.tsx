@@ -886,7 +886,6 @@ export const AdminDispatchModal: React.FC<Props> = ({
                     <Sparkles className="w-3.5 h-3.5 text-amber-400" />
                     <span>Instant Dispatcher Access</span>
                   </span>
-                  <span className="text-[10px] text-slate-400 font-mono">Password: 2481</span>
                 </div>
                 {bypassError && (
                   <div className="p-2 rounded-lg bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px]">
@@ -901,7 +900,7 @@ export const AdminDispatchModal: React.FC<Props> = ({
                       setBypassPinInput(e.target.value);
                       setBypassError(null);
                     }}
-                    placeholder="Enter Password (2481)"
+                    placeholder="Enter Master Password"
                     className="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-xs focus:outline-none focus:border-amber-400"
                   />
                   <button

@@ -2077,7 +2077,13 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => setOnboardTab('permissions')}
+                onClick={() => {
+                  if (!driver.name || !driver.mobile || !driver.vehicleNumber) {
+                    alert('Please complete and save your Profile details in Tab 1 first.');
+                    return;
+                  }
+                  setOnboardTab('permissions');
+                }}
                 className={`py-2 rounded-xl font-bold transition flex items-center justify-center space-x-1 ${
                   onboardTab === 'permissions'
                     ? 'bg-sky-600 text-white shadow-md'
@@ -2090,7 +2096,13 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => setOnboardTab('activate')}
+                onClick={() => {
+                  if (!locationGranted || !notificationGranted) {
+                    alert('Please grant Location & Notification permissions in Tab 2 first.');
+                    return;
+                  }
+                  setOnboardTab('activate');
+                }}
                 className={`py-2 rounded-xl font-bold transition flex items-center justify-center space-x-1 ${
                   onboardTab === 'activate'
                     ? 'bg-sky-600 text-white shadow-md'
@@ -2527,7 +2539,6 @@ export default function App() {
                     type="text"
                     inputMode="numeric"
                     pattern="[0-9]*"
-                    maxLength={6}
                     autoFocus
                     value={inputActivationCode}
                     onPaste={(e) => {
@@ -2539,7 +2550,7 @@ export default function App() {
                         soundEngine.playClaimSuccess();
                       }
                     }}
-                    onChange={(e) => setInputActivationCode(e.target.value.replace(/\D/g, ''))}
+                    onChange={(e) => setInputActivationCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
                     placeholder="• • • • • •"
                     className="w-full text-center tracking-[0.4em] font-mono text-2xl font-black py-3 bg-slate-950 border border-sky-500/40 focus:border-sky-400 rounded-2xl text-white focus:outline-none transition shadow-inner select-all"
                   />
@@ -2748,7 +2759,7 @@ export default function App() {
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Enter the Dispatcher Control Password (<code className="text-amber-400 font-mono font-bold">2481</code>) to access trip dispatching, tariff configuration, and fleet management.
+              Enter the Dispatcher Control Password to access trip dispatching, tariff configuration, and fleet management.
             </p>
 
             {dispatchPinError && (
@@ -2771,7 +2782,7 @@ export default function App() {
                     setDispatchPinInput(e.target.value);
                     setDispatchPinError(null);
                   }}
-                  placeholder="Enter Password (2481)"
+                  placeholder="Enter Admin Password"
                   className="w-full py-3 px-4 bg-slate-950 border border-slate-700 rounded-2xl text-white text-center font-mono text-xl tracking-widest focus:outline-none focus:border-sky-400"
                 />
               </div>
@@ -2788,7 +2799,7 @@ export default function App() {
         </div>
       )}
 
-      {/* SECRET BRAND ACTIVATION SECURITY PIN MODAL (5-Tap Trigger, PIN: 140423) */}
+      {/* SECRET BRAND ACTIVATION SECURITY PIN MODAL (5-Tap Trigger) */}
       {showSecretPinModal && (
         <div className="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4">
           <div className="bg-slate-900 border border-slate-700 w-full max-w-sm rounded-3xl p-6 shadow-2xl space-y-4 animate-in fade-in zoom-in duration-150">
@@ -2807,7 +2818,7 @@ export default function App() {
             </div>
 
             <p className="text-xs text-slate-300 leading-relaxed">
-              Enter the 6-digit administrator security PIN (<code className="text-amber-400 font-mono font-bold">140423</code>) to bypass login and enter Master Admin Panel &amp; SQL Settings.
+              Enter the 6-digit administrator security PIN to bypass login and enter Master Admin Panel &amp; SQL Settings.
             </p>
 
             {secretPinError && (

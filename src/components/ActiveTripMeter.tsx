@@ -770,6 +770,15 @@ export const ActiveTripMeter: React.FC<Props> = ({ trip, driver, onTripCompleted
           </div>
 
           <div className="flex items-center space-x-2">
+            <button
+              type="button"
+              onClick={() => setIsSpeedBubbleMode(true)}
+              className="px-2.5 py-1 rounded-xl bg-sky-600/30 hover:bg-sky-600/50 text-sky-300 border border-sky-500/40 text-[10px] font-black uppercase flex items-center space-x-1 shadow transition active:scale-95"
+              title="Switch to Floating Meter Overlay (Speed Only, No Fare)"
+            >
+              <Gauge className="w-3 h-3 text-sky-400" />
+              <span>Speed Bubble</span>
+            </button>
             <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-black uppercase flex items-center space-x-1">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
               <span>LIVE</span>
