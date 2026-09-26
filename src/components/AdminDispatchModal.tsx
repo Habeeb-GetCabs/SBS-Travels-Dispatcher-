@@ -1142,7 +1142,7 @@ export const AdminDispatchModal: React.FC<Props> = ({
                   </div>
 
                   {showMapsKeyInput && (
-                    <form onSubmit={handleSaveMapsKey} className="pt-2 space-y-2">
+                    <div className="pt-2 space-y-2">
                       <p className="text-[11px] text-slate-400">
                         Paste your active <strong>Google Maps Places API Key</strong> below to enable live place search &amp; route estimates without fallback:
                       </p>
@@ -1151,17 +1151,24 @@ export const AdminDispatchModal: React.FC<Props> = ({
                           type="password"
                           value={inputMapsKey}
                           onChange={(e) => setInputMapsKey(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') {
+                              e.preventDefault();
+                              handleSaveMapsKey(e);
+                            }
+                          }}
                           placeholder="AIzaSy..."
                           className="flex-1 text-xs py-1.5 px-3 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500"
                         />
                         <button
-                          type="submit"
+                          type="button"
+                          onClick={handleSaveMapsKey}
                           className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg shadow shrink-0"
                         >
                           Save Key
                         </button>
                       </div>
-                    </form>
+                    </div>
                   )}
                 </div>
 
