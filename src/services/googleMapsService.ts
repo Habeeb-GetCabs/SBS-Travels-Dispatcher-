@@ -1,5 +1,6 @@
+// Source: Google Maps Platform Code Assist
 // Google Places API (New) & Routes API Integration for SBS Travels Dispatch
-// Provides autocomplete suggestions with session tokens and driving route estimations
+// Provides live real-time autocomplete suggestions with session tokens and driving route estimations
 
 export interface PlaceSuggestion {
   placeId: string;
@@ -24,9 +25,23 @@ export interface RouteEstimationResult {
   status: 'ROUTES_API_SUCCESS' | 'GEODETIC_CALCULATED' | 'FALLBACK';
 }
 
-const GOOGLE_MAPS_KEY = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY || localStorage.getItem('sbs_google_maps_key') || '';
+export const getStoredGoogleMapsKey = (): string => {
+  return (
+    (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY ||
+    localStorage.getItem('sbs_google_maps_key') ||
+    ''
+  );
+};
 
-// Known landmark database for immediate offline/development autocomplete
+export const setStoredGoogleMapsKey = (key: string): void => {
+  if (key) {
+    localStorage.setItem('sbs_google_maps_key', key.trim());
+  } else {
+    localStorage.removeItem('sbs_google_maps_key');
+  }
+};
+
+// Known landmark database for immediate offline/fallback autocomplete
 const COMMON_LANDMARKS: PlaceSuggestion[] = [
   {
     placeId: 'ChIJ574W5uNnUjoR-K8u5Z3P_Z0',
@@ -94,6 +109,43 @@ const COMMON_LANDMARKS: PlaceSuggestion[] = [
   }
 ];
 
+// Load Google Maps JS SDK dynamically to support native browser Places/Routes API calls
+let sdkPromise: Promise<any> | null = null;
+let currentLoadedKey = '';
+
+export const loadGoogleMapsSDK = async (key: string): Promise<any> => {
+  if (!key) return null;
+  if ((window as any).google?.maps?.places && currentLoadedKey === key) {
+    return (window as any).google;
+  }
+  if (sdkPromise && currentLoadedKey === key) {
+    return sdkPromise;
+  }
+
+  currentLoadedKey = key;
+  sdkPromise = new Promise((resolve, reject) => {
+    const existingScript = document.getElementById('gmaps-js-sdk');
+    if (existingScript) {
+      existingScript.remove();
+    }
+    const script = document.createElement('script');
+    script.id = 'gmaps-js-sdk';
+    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodeURIComponent(key)}&libraries=places,routes,geometry&v=weekly`;
+    script.async = true;
+    script.onload = () => {
+      if ((window as any).google?.maps) {
+        resolve((window as any).google);
+      } else {
+        reject(new Error('Google Maps SDK loaded but google.maps missing'));
+      }
+    };
+    script.onerror = (e) => reject(e);
+    document.head.appendChild(script);
+  });
+
+  return sdkPromise;
+};
+
 // Generate UUID v4 for Google Places session token
 export const createPlacesSessionToken = (): string => {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
@@ -103,7 +155,7 @@ export const createPlacesSessionToken = (): string => {
   });
 };
 
-// Autocomplete using Google Places API (New) with fallback
+// Autocomplete using Google Places API (New) - Bypasses CORS via Proxy and JS SDK
 export const fetchPlacePredictions = async (
   input: string,
   sessionToken: string
@@ -111,23 +163,22 @@ export const fetchPlacePredictions = async (
   const query = input.trim();
   if (query.length < 2) return [];
 
-  if (GOOGLE_MAPS_KEY) {
+  const key = getStoredGoogleMapsKey();
+  if (key) {
+    // Attempt 1: Server proxy (bypasses browser CORS preflight restrictions)
     try {
-      const response = await fetch(
-        'https://places.googleapis.com/v1/places:autocomplete',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
-          },
-          body: JSON.stringify({
-            input: query,
-            sessionToken: sessionToken,
-            includedRegionCodes: ['in'],
-          }),
-        }
-      );
+      const response = await fetch('/api/gmaps/places/v1/places:autocomplete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': key,
+        },
+        body: JSON.stringify({
+          input: query,
+          sessionToken: sessionToken,
+          includedRegionCodes: ['in'],
+        }),
+      });
 
       if (response.ok) {
         const data = await response.json();
@@ -136,19 +187,80 @@ export const fetchPlacePredictions = async (
             const pred = s.placePrediction;
             return {
               placeId: pred.placeId,
-              primaryText: pred.structuredFormat?.mainText?.text || pred.text?.text,
+              primaryText: pred.structuredFormat?.mainText?.text || pred.text?.text || query,
               secondaryText: pred.structuredFormat?.secondaryText?.text || '',
-              fullAddress: pred.text?.text || '',
+              fullAddress: pred.text?.text || pred.structuredFormat?.mainText?.text || query,
             };
           });
         }
       }
     } catch (err) {
-      console.warn('Google Places API notice, using matching landmarks:', err);
+      console.warn('Google Places Proxy attempt notice:', err);
+    }
+
+    // Attempt 2: Direct Google Places REST Endpoint
+    try {
+      const response = await fetch('https://places.googleapis.com/v1/places:autocomplete', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': key,
+        },
+        body: JSON.stringify({
+          input: query,
+          sessionToken: sessionToken,
+          includedRegionCodes: ['in'],
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.suggestions && Array.isArray(data.suggestions)) {
+          return data.suggestions.map((s: any) => {
+            const pred = s.placePrediction;
+            return {
+              placeId: pred.placeId,
+              primaryText: pred.structuredFormat?.mainText?.text || pred.text?.text || query,
+              secondaryText: pred.structuredFormat?.secondaryText?.text || '',
+              fullAddress: pred.text?.text || pred.structuredFormat?.mainText?.text || query,
+            };
+          });
+        }
+      }
+    } catch (err) {
+      console.warn('Direct Google Places REST notice:', err);
+    }
+
+    // Attempt 3: Google Maps JS SDK (if loaded)
+    try {
+      const google = await loadGoogleMapsSDK(key);
+      if (google?.maps?.places) {
+        const placesLib = (await google.maps.importLibrary('places')) as any;
+        if (placesLib?.AutocompleteSuggestion) {
+          const res = await placesLib.AutocompleteSuggestion.fetchAutocompleteSuggestions({
+            input: query,
+            sessionToken: sessionToken ? new google.maps.places.AutocompleteSessionToken() : undefined,
+            includedRegionCodes: ['in'],
+          });
+          if (res?.suggestions && res.suggestions.length > 0) {
+            return res.suggestions.map((s: any) => {
+              const pred = s.placePrediction;
+              return {
+                placeId: pred.placeId || pred.place,
+                primaryText: pred.mainText?.text || pred.text?.text || query,
+                secondaryText: pred.secondaryText?.text || '',
+                fullAddress: pred.text?.text || pred.mainText?.text || query,
+              };
+            });
+          }
+        }
+      }
+    } catch (sdkErr) {
+      console.warn('Google Maps JS SDK Autocomplete notice:', sdkErr);
     }
   }
 
-  // Matching from landmark database
+  // Matching from landmark database as fallback if no API key or network failure
   const lower = query.toLowerCase();
   const matched = COMMON_LANDMARKS.filter(
     (l) =>
@@ -168,7 +280,7 @@ export const fetchPlacePredictions = async (
       primaryText: query,
       secondaryText: 'Custom Entered Location',
       fullAddress: query,
-    }
+    },
   ];
 };
 
@@ -189,10 +301,12 @@ export const fetchPlaceDetails = async (
     };
   }
 
-  if (GOOGLE_MAPS_KEY && !placeId.startsWith('custom-')) {
+  const key = getStoredGoogleMapsKey();
+  if (key && !placeId.startsWith('custom-')) {
+    // Attempt 1: Server proxy
     try {
       const response = await fetch(
-        `https://places.googleapis.com/v1/places/${placeId}?fields=id,displayName,formattedAddress,location&key=${GOOGLE_MAPS_KEY}`,
+        `/api/gmaps/places/v1/places/${placeId}?fields=id,displayName,formattedAddress,location&key=${key}`,
         {
           headers: {
             'Content-Type': 'application/json',
@@ -204,7 +318,7 @@ export const fetchPlaceDetails = async (
       if (response.ok) {
         const data = await response.json();
         return {
-          placeId: data.id,
+          placeId: data.id || placeId,
           name: data.displayName?.text || '',
           formattedAddress: data.formattedAddress || '',
           latitude: data.location?.latitude || 0,
@@ -212,7 +326,56 @@ export const fetchPlaceDetails = async (
         };
       }
     } catch (err) {
-      console.warn('Google Place Details notice:', err);
+      console.warn('Google Place Details Proxy notice:', err);
+    }
+
+    // Attempt 2: Direct REST
+    try {
+      const response = await fetch(
+        `https://places.googleapis.com/v1/places/${placeId}?fields=id,displayName,formattedAddress,location&key=${key}`,
+        {
+          headers: {
+            'Content-Type': 'application/json',
+            ...(sessionToken ? { 'X-Goog-FieldMask': 'id,displayName,formattedAddress,location' } : {}),
+          },
+        }
+      );
+
+      if (response.ok) {
+        const data = await response.json();
+        return {
+          placeId: data.id || placeId,
+          name: data.displayName?.text || '',
+          formattedAddress: data.formattedAddress || '',
+          latitude: data.location?.latitude || 0,
+          longitude: data.location?.longitude || 0,
+        };
+      }
+    } catch (err) {
+      console.warn('Direct Google Place Details REST notice:', err);
+    }
+
+    // Attempt 3: JS SDK Place class
+    try {
+      const google = await loadGoogleMapsSDK(key);
+      if (google?.maps?.places) {
+        const placesLib = (await google.maps.importLibrary('places')) as any;
+        if (placesLib?.Place) {
+          const place = new placesLib.Place({ id: placeId });
+          await place.fetchFields({
+            fields: ['displayName', 'formattedAddress', 'location'],
+          });
+          return {
+            placeId: place.id || placeId,
+            name: place.displayName || '',
+            formattedAddress: place.formattedAddress || '',
+            latitude: place.location?.lat() || 0,
+            longitude: place.location?.lng() || 0,
+          };
+        }
+      }
+    } catch (sdkErr) {
+      console.warn('Google Maps JS SDK Place Details notice:', sdkErr);
     }
   }
 
@@ -224,46 +387,46 @@ export const calculateDrivingRoute = async (
   origin: { latitude?: number; longitude?: number; address?: string },
   destination: { latitude?: number; longitude?: number; address?: string }
 ): Promise<RouteEstimationResult> => {
-  // If coordinates are present and Google API key is configured, call Routes API
+  const key = getStoredGoogleMapsKey();
   if (
-    GOOGLE_MAPS_KEY &&
+    key &&
     origin.latitude &&
     origin.longitude &&
     destination.latitude &&
     destination.longitude
   ) {
-    try {
-      const response = await fetch(
-        'https://routes.googleapis.com/directions/v2:computeRoutes',
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Goog-Api-Key': GOOGLE_MAPS_KEY,
-            'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+    const requestBody = JSON.stringify({
+      origin: {
+        location: {
+          latLng: {
+            latitude: origin.latitude,
+            longitude: origin.longitude,
           },
-          body: JSON.stringify({
-            origin: {
-              location: {
-                latLng: {
-                  latitude: origin.latitude,
-                  longitude: origin.longitude,
-                },
-              },
-            },
-            destination: {
-              location: {
-                latLng: {
-                  latitude: destination.latitude,
-                  longitude: destination.longitude,
-                },
-              },
-            },
-            travelMode: 'DRIVE',
-            routingPreference: 'TRAFFIC_UNAWARE',
-          }),
-        }
-      );
+        },
+      },
+      destination: {
+        location: {
+          latLng: {
+            latitude: destination.latitude,
+            longitude: destination.longitude,
+          },
+        },
+      },
+      travelMode: 'DRIVE',
+      routingPreference: 'TRAFFIC_UNAWARE',
+    });
+
+    // Attempt 1: Server proxy
+    try {
+      const response = await fetch('/api/gmaps/routes/directions/v2:computeRoutes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': key,
+          'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+        },
+        body: requestBody,
+      });
 
       if (response.ok) {
         const data = await response.json();
@@ -281,11 +444,42 @@ export const calculateDrivingRoute = async (
         }
       }
     } catch (err) {
-      console.warn('Routes API computeRoutes notice, using route approximation:', err);
+      console.warn('Routes API Proxy computeRoutes notice:', err);
+    }
+
+    // Attempt 2: Direct REST
+    try {
+      const response = await fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Goog-Api-Key': key,
+          'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration',
+        },
+        body: requestBody,
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const route = data.routes?.[0];
+        if (route) {
+          const meters = route.distanceMeters || 0;
+          const durationStr = route.duration || '0s';
+          const seconds = parseInt(durationStr.replace('s', ''), 10) || 0;
+
+          return {
+            distanceKm: Number((meters / 1000).toFixed(1)),
+            durationMinutes: Math.ceil(seconds / 60),
+            status: 'ROUTES_API_SUCCESS',
+          };
+        }
+      }
+    } catch (err) {
+      console.warn('Direct Routes API computeRoutes notice:', err);
     }
   }
 
-  // High-fidelity fallback based on Haversine distance * road tortuosity factor (~1.25)
+  // Fallback based on Haversine distance * road tortuosity factor (~1.28)
   if (
     origin.latitude &&
     origin.longitude &&
@@ -305,7 +499,6 @@ export const calculateDrivingRoute = async (
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
     const straightKm = R * c;
 
-    // Road factor: Driving distance is approximately 25-30% longer than straight line in city/highways
     const estimatedRoadKm = Number((straightKm * 1.28).toFixed(1));
     const estimatedMinutes = Math.max(10, Math.round(estimatedRoadKm * 2.1));
 
@@ -316,7 +509,6 @@ export const calculateDrivingRoute = async (
     };
   }
 
-  // Default fallback estimate
   return {
     distanceKm: 25.0,
     durationMinutes: 45,

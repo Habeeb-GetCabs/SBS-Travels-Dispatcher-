@@ -84,7 +84,106 @@ export const TripSummaryModal: React.FC<Props> = ({ summary, driver: passedDrive
   const qrImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(upiUri)}`;
 
   const handlePrintReceipt = () => {
-    window.print();
+    handleDownloadPdfBill();
+  };
+
+  const handleDownloadPdfBill = () => {
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow popups in your browser to generate and download the PDF bill.');
+      return;
+    }
+
+    const htmlContent = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="utf-8">
+        <title>SBS Travels Invoice - ${summary.tripNumber}</title>
+        <style>
+          body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; padding: 30px; color: #0f172a; max-width: 650px; margin: 0 auto; line-height: 1.5; }
+          .header { text-align: center; border-bottom: 2px solid #0284c7; padding-bottom: 16px; margin-bottom: 24px; }
+          .header h1 { margin: 0; color: #0284c7; font-size: 28px; font-weight: 800; letter-spacing: -0.5px; }
+          .header p { margin: 4px 0 0 0; font-size: 13px; color: #64748b; font-weight: 600; }
+          .badge { display: inline-block; background: #e0f2fe; color: #0369a1; padding: 4px 12px; border-radius: 20px; font-size: 11px; font-weight: 700; text-transform: uppercase; margin-top: 8px; letter-spacing: 0.5px; }
+          .grid { display: flex; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
+          .box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 12px; padding: 14px; flex: 1; box-sizing: border-box; }
+          .box h3 { margin: 0 0 10px 0; font-size: 11px; color: #64748b; text-transform: uppercase; tracking: 1px; font-weight: 700; }
+          .box p { margin: 4px 0; font-size: 13px; color: #334155; }
+          .table { width: 100%; border-collapse: collapse; margin-bottom: 24px; font-size: 13px; }
+          .table th { background: #f1f5f9; text-align: left; padding: 10px 14px; font-size: 11px; text-transform: uppercase; color: #475569; border-bottom: 2px solid #cbd5e1; font-weight: 700; }
+          .table td { padding: 10px 14px; border-bottom: 1px solid #e2e8f0; color: #334155; }
+          .total-row { font-weight: 800; font-size: 16px; background: #f8fafc; color: #0284c7; }
+          .total-row td { border-top: 2px solid #0284c7; padding-top: 12px; padding-bottom: 12px; }
+          .footer { text-align: center; margin-top: 32px; font-size: 12px; color: #64748b; border-top: 1px solid #e2e8f0; padding-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>SBS TRAVELS</h1>
+          <p>Powered by Get Taxi</p>
+          <div class="badge">Official Trip Invoice</div>
+        </div>
+
+        <div class="grid">
+          <div class="box">
+            <h3>Trip Information</h3>
+            <p><strong>Trip No:</strong> ${summary.tripNumber}</p>
+            <p><strong>Customer:</strong> ${summary.customerName}</p>
+            <p><strong>Pickup:</strong> ${summary.pickupAddress}</p>
+            <p><strong>Drop:</strong> ${summary.dropAddress}</p>
+          </div>
+          <div class="box">
+            <h3>Driver & Vehicle</h3>
+            <p><strong>Driver:</strong> ${driver.name} (${driver.driverCode})</p>
+            <p><strong>Vehicle No:</strong> ${driver.vehicleNumber}</p>
+            <p><strong>Vehicle Model:</strong> ${driver.vehicleModel || 'Taxi'}</p>
+            <p><strong>Distance:</strong> ${summary.distanceKm.toFixed(2)} km</p>
+          </div>
+        </div>
+
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Fare Details</th>
+              <th style="text-align: right;">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>Base Fare</td><td style="text-align: right;">₹${summary.baseFare}</td></tr>
+            <tr><td>Distance Charge (${summary.distanceKm.toFixed(2)} km)</td><td style="text-align: right;">₹${summary.distanceFare}</td></tr>
+            <tr><td>Waiting Charge (${Math.floor(summary.waitingSeconds / 60)} min)</td><td style="text-align: right;">₹${summary.waitingFare}</td></tr>
+            ${summary.driverBata > 0 ? `<tr><td>Driver Bata</td><td style="text-align: right;">₹${summary.driverBata}</td></tr>` : ''}
+            ${summary.toll > 0 ? `<tr><td>Toll Charges</td><td style="text-align: right;">₹${summary.toll}</td></tr>` : ''}
+            ${summary.parking > 0 ? `<tr><td>Parking Charges</td><td style="text-align: right;">₹${summary.parking}</td></tr>` : ''}
+            ${summary.interstateTax > 0 ? `<tr><td>Interstate Tax</td><td style="text-align: right;">₹${summary.interstateTax}</td></tr>` : ''}
+            ${summary.additionalCharges > 0 ? `<tr><td>Extra Charges</td><td style="text-align: right;">₹${summary.additionalCharges}</td></tr>` : ''}
+            ${summary.discount > 0 ? `<tr><td>Discount</td><td style="text-align: right; color: #16a34a;">-₹${summary.discount}</td></tr>` : ''}
+            <tr class="total-row">
+              <td>TOTAL FARE DUE</td>
+              <td style="text-align: right;">₹${summary.totalFare}</td>
+            </tr>
+          </tbody>
+        </table>
+
+        <div class="footer">
+          <p>Thank you for traveling with SBS Travels! Have a pleasant day.</p>
+          <p style="font-size: 10px; color: #94a3b8; margin-top: 8px;">Invoice generated on ${new Date().toLocaleString('en-IN')}</p>
+        </div>
+
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 300);
+          };
+        </script>
+      </body>
+      </html>
+    `;
+
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
   };
 
   return (

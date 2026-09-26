@@ -117,16 +117,37 @@ export const DISPATCH_TARIFF_PRESETS: Record<string, Partial<TariffConfig>> = {
 };
 
 // Create a blank or pre-filled TariffConfig for dispatch forms
+export const createBlankTariffConfig = (pricingType: string = 'PER_KM'): TariffConfig => {
+  return {
+    pricingType,
+    baseFare: 0,
+    includedKm: 0,
+    minimumKm: 0,
+    ratePerKm: 0,
+    waitingRatePerMinute: 0,
+    waitingGraceMinutes: 0,
+    driverBata: 0,
+    toll: 0,
+    parking: 0,
+    interstateTax: 0,
+    additionalCharges: 0,
+    commissionCharge: 0,
+    discount: 0,
+    roundingRule: 'ROUND_NEAREST',
+    quotedAmount: 0,
+  };
+};
+
 export const createDefaultTariffConfig = (presetKey: string = 'ONE_WAY'): TariffConfig => {
   const preset = DISPATCH_TARIFF_PRESETS[presetKey] || DISPATCH_TARIFF_PRESETS.ONE_WAY;
   return {
     pricingType: preset.pricingType || 'PER_KM',
-    baseFare: preset.baseFare ?? 500,
-    includedKm: preset.includedKm ?? 25,
-    minimumKm: preset.minimumKm ?? 25,
-    ratePerKm: preset.ratePerKm ?? 16,
-    waitingRatePerMinute: preset.waitingRatePerMinute ?? 2,
-    waitingGraceMinutes: preset.waitingGraceMinutes ?? 15,
+    baseFare: preset.baseFare ?? 0,
+    includedKm: preset.includedKm ?? 0,
+    minimumKm: preset.minimumKm ?? 0,
+    ratePerKm: preset.ratePerKm ?? 0,
+    waitingRatePerMinute: preset.waitingRatePerMinute ?? 0,
+    waitingGraceMinutes: preset.waitingGraceMinutes ?? 0,
     driverBata: preset.driverBata ?? 0,
     toll: preset.toll ?? 0,
     parking: preset.parking ?? 0,
@@ -135,7 +156,7 @@ export const createDefaultTariffConfig = (presetKey: string = 'ONE_WAY'): Tariff
     commissionCharge: (preset as any).commissionCharge ?? 0,
     discount: preset.discount ?? 0,
     roundingRule: (preset.roundingRule as any) || 'ROUND_NEAREST',
-    quotedAmount: preset.quotedAmount ?? preset.baseFare ?? 500,
+    quotedAmount: preset.quotedAmount ?? preset.baseFare ?? 0,
   };
 };
 

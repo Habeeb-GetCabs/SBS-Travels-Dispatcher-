@@ -13,6 +13,19 @@ export default defineConfig(() => {
       },
     },
     server: {
+      // Proxy Google Maps APIs to bypass browser CORS constraints
+      proxy: {
+        '/api/gmaps/places': {
+          target: 'https://places.googleapis.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/gmaps\/places/, ''),
+        },
+        '/api/gmaps/routes': {
+          target: 'https://routes.googleapis.com',
+          changeOrigin: true,
+          rewrite: (path) => path.replace(/^\/api\/gmaps\/routes/, ''),
+        },
+      },
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',

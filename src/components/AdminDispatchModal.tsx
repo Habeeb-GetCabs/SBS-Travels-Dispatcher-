@@ -38,12 +38,14 @@ import {
 } from '../services/tripService';
 import { calculateHaversineKm } from '../services/gpsFilter';
 import { SBS_TRAVELS_SQL_SCHEMA, SBS_DRIVER_AUTH_FIX_SQL } from '../services/schemaSql';
-import { createDefaultTariffConfig, calculateCustomTripFare } from '../services/tariffService';
+import { createDefaultTariffConfig, createBlankTariffConfig, calculateCustomTripFare } from '../services/tariffService';
 import {
   fetchPlacePredictions,
   fetchPlaceDetails,
   calculateDrivingRoute,
   createPlacesSessionToken,
+  getStoredGoogleMapsKey,
+  setStoredGoogleMapsKey,
   PlaceSuggestion,
 } from '../services/googleMapsService';
 import {
@@ -165,10 +167,12 @@ export const AdminDispatchModal: React.FC<Props> = ({
   const [isLoggingIn, setIsLoggingIn] = useState<boolean>(false);
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // Supabase Configuration Input States
+  // Supabase & Google Maps Configuration Input States
   const [inputSupabaseUrl, setInputSupabaseUrl] = useState<string>(supabaseUrl || '');
   const [inputSupabaseKey, setInputSupabaseKey] = useState<string>(supabaseAnonKey || '');
   const [showSupabaseSetup, setShowSupabaseSetup] = useState<boolean>(!isSupabaseConfigured());
+  const [inputMapsKey, setInputMapsKey] = useState<string>(getStoredGoogleMapsKey());
+  const [showMapsKeyInput, setShowMapsKeyInput] = useState<boolean>(!getStoredGoogleMapsKey());
 
   const handleSaveSupabaseSettings = (e: React.FormEvent) => {
     e.preventDefault();
@@ -177,6 +181,13 @@ export const AdminDispatchModal: React.FC<Props> = ({
       return;
     }
     saveSupabaseConfig(inputSupabaseUrl.trim(), inputSupabaseKey.trim());
+  };
+
+  const handleSaveMapsKey = (e: React.FormEvent) => {
+    e.preventDefault();
+    setStoredGoogleMapsKey(inputMapsKey);
+    alert('Google Maps API Key saved! Address Autocomplete & Driving Distance estimates are now live.');
+    setShowMapsKeyInput(false);
   };
 
   // Credential 4: Passenger Verification OTP
@@ -188,8 +199,8 @@ export const AdminDispatchModal: React.FC<Props> = ({
   const [routeDurationMin, setRouteDurationMin] = useState<number>(45);
   const [isCalculatingRoute, setIsCalculatingRoute] = useState<boolean>(false);
 
-  // Custom Per-Trip Tariff Configuration
-  const [tariff, setTariff] = useState<TariffConfig>(createDefaultTariffConfig('ONE_WAY'));
+  // Custom Per-Trip Tariff Configuration (Starts Blank/Empty as requested)
+  const [tariff, setTariff] = useState<TariffConfig>(createBlankTariffConfig('ONE_WAY'));
 
   // Autocomplete state
   const [pickupSuggestions, setPickupSuggestions] = useState<PlaceSuggestion[]>([]);
@@ -561,7 +572,7 @@ export const AdminDispatchModal: React.FC<Props> = ({
 
   const handlePresetSelect = (presetKey: string) => {
     setTripType(presetKey);
-    const newConfig = createDefaultTariffConfig(presetKey);
+    const newConfig = createBlankTariffConfig(presetKey);
     setTariff(newConfig);
   };
 
@@ -1142,6 +1153,57 @@ export const AdminDispatchModal: React.FC<Props> = ({
                   </div>
                 </div>
 
+                {/* Google Maps API Key Status & Config Box */}
+                <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span className={`w-2 h-2 rounded-full ${getStoredGoogleMapsKey() ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+                      <span className="text-xs font-bold text-slate-200">
+                        Google Places Autocomplete
+                      </span>
+                      {getStoredGoogleMapsKey() ? (
+                        <span className="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[10px] font-mono font-bold">
+                          Live API Active
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 text-[10px] font-mono">
+                          Key Needed
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setShowMapsKeyInput(!showMapsKeyInput)}
+                      className="text-xs text-sky-400 hover:text-sky-300 font-bold underline"
+                    >
+                      {showMapsKeyInput ? 'Close' : '⚙️ Change API Key'}
+                    </button>
+                  </div>
+
+                  {showMapsKeyInput && (
+                    <form onSubmit={handleSaveMapsKey} className="pt-2 space-y-2">
+                      <p className="text-[11px] text-slate-400">
+                        Paste your active <strong>Google Maps Places API Key</strong> below to enable live place search &amp; route estimates without fallback:
+                      </p>
+                      <div className="flex items-center space-x-2">
+                        <input
+                          type="password"
+                          value={inputMapsKey}
+                          onChange={(e) => setInputMapsKey(e.target.value)}
+                          placeholder="AIzaSy..."
+                          className="flex-1 text-xs py-1.5 px-3 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono focus:outline-none focus:border-sky-500"
+                        />
+                        <button
+                          type="submit"
+                          className="px-3 py-1.5 bg-sky-600 hover:bg-sky-500 text-white font-bold text-xs rounded-lg shadow shrink-0"
+                        >
+                          Save Key
+                        </button>
+                      </div>
+                    </form>
+                  )}
+                </div>
+
                 {/* Pickup Address with Google Places Autocomplete */}
                 <div className="relative">
                   <div className="flex items-center justify-between mb-1">
@@ -1254,11 +1316,11 @@ export const AdminDispatchModal: React.FC<Props> = ({
                         Custom Trip Fare Configuration
                       </span>
                       <span className="text-[10px] text-slate-400">
-                        Dispatcher defines exact pricing for this trip
+                        Type rates manually into the empty boxes below
                       </span>
                     </div>
-                    {/* Quick Preset Selector for Convenience */}
-                    <div className="flex space-x-1">
+                    {/* Quick Preset Selector & Reset Button */}
+                    <div className="flex items-center space-x-1">
                       {['LOCAL', 'HOURLY', 'ONE_WAY', 'ROUND_TRIP', 'AIRPORT'].map((preset) => (
                         <button
                           key={preset}
@@ -1273,146 +1335,135 @@ export const AdminDispatchModal: React.FC<Props> = ({
                           {preset}
                         </button>
                       ))}
+                      <button
+                        type="button"
+                        onClick={() => setTariff(createBlankTariffConfig(tripType))}
+                        className="text-[9px] font-bold px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 hover:bg-rose-500/30 border border-rose-500/30 transition"
+                        title="Clear all tariff boxes to empty"
+                      >
+                        Clear
+                      </button>
                     </div>
                   </div>
 
-                  {/* Tariff Grid Inputs - Tailored per trip type */}
-                  {tripType === 'LOCAL' ? (
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-                      <div>
-                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                          Base Fare (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={tariff.baseFare}
-                          onChange={(e) => setTariff({ ...tariff, baseFare: Number(e.target.value) })}
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                          Per KM Charge (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={tariff.ratePerKm}
-                          onChange={(e) => setTariff({ ...tariff, ratePerKm: Number(e.target.value) })}
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                          Waiting Charge (₹/min)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={tariff.waitingRatePerMinute}
-                          onChange={(e) =>
-                            setTariff({ ...tariff, waitingRatePerMinute: Number(e.target.value) })
-                          }
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-amber-400 block mb-0.5">
-                          Commission Charge (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={tariff.commissionCharge || 0}
-                          onChange={(e) => setTariff({ ...tariff, commissionCharge: Number(e.target.value) })}
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-amber-500/40 rounded-lg text-amber-300 font-mono font-bold"
-                        />
-                      </div>
+                  {/* Tariff Grid Inputs - All 6 fields as empty boxes ready for manual typing */}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                        Base Fare (₹)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={tariff.baseFare === 0 ? '' : tariff.baseFare}
+                        onChange={(e) =>
+                          setTariff({
+                            ...tariff,
+                            baseFare: e.target.value === '' ? 0 : Number(e.target.value),
+                          })
+                        }
+                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono placeholder:text-slate-600 focus:border-sky-500 focus:outline-none"
+                      />
                     </div>
-                  ) : tripType === 'HOURLY' ? (
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <div>
-                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                          Per Hour Charge (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={tariff.baseFare}
-                          onChange={(e) => setTariff({ ...tariff, baseFare: Number(e.target.value) })}
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                          Free KM Box
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={tariff.includedKm}
-                          onChange={(e) => setTariff({ ...tariff, includedKm: Number(e.target.value) })}
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                          Additional Per KM (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={tariff.ratePerKm}
-                          onChange={(e) => setTariff({ ...tariff, ratePerKm: Number(e.target.value) })}
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                        />
-                      </div>
+
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                        Per KM Rate (₹)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder="0"
+                        value={tariff.ratePerKm === 0 ? '' : tariff.ratePerKm}
+                        onChange={(e) =>
+                          setTariff({
+                            ...tariff,
+                            ratePerKm: e.target.value === '' ? 0 : Number(e.target.value),
+                          })
+                        }
+                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono placeholder:text-slate-600 focus:border-sky-500 focus:outline-none"
+                      />
                     </div>
-                  ) : (
-                    <div className="grid grid-cols-3 gap-2.5">
-                      <div>
-                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                          Base Fare (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={tariff.baseFare}
-                          onChange={(e) => setTariff({ ...tariff, baseFare: Number(e.target.value) })}
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                          Driver Bata (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          value={tariff.driverBata}
-                          onChange={(e) => setTariff({ ...tariff, driverBata: Number(e.target.value) })}
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
-                          Per KM Charge (₹)
-                        </label>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.5"
-                          value={tariff.ratePerKm}
-                          onChange={(e) => setTariff({ ...tariff, ratePerKm: Number(e.target.value) })}
-                          className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono"
-                        />
-                      </div>
+
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                        Waiting Charge (₹/min)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.5"
+                        placeholder="0"
+                        value={tariff.waitingRatePerMinute === 0 ? '' : tariff.waitingRatePerMinute}
+                        onChange={(e) =>
+                          setTariff({
+                            ...tariff,
+                            waitingRatePerMinute: e.target.value === '' ? 0 : Number(e.target.value),
+                          })
+                        }
+                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono placeholder:text-slate-600 focus:border-sky-500 focus:outline-none"
+                      />
                     </div>
-                  )}
+
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                        Driver Bata (₹)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={tariff.driverBata === 0 ? '' : tariff.driverBata}
+                        onChange={(e) =>
+                          setTariff({
+                            ...tariff,
+                            driverBata: e.target.value === '' ? 0 : Number(e.target.value),
+                          })
+                        }
+                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono placeholder:text-slate-600 focus:border-sky-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-semibold text-slate-400 block mb-0.5">
+                        Free / Included KM
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={tariff.includedKm === 0 ? '' : tariff.includedKm}
+                        onChange={(e) =>
+                          setTariff({
+                            ...tariff,
+                            includedKm: e.target.value === '' ? 0 : Number(e.target.value),
+                          })
+                        }
+                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-slate-700 rounded-lg text-white font-mono placeholder:text-slate-600 focus:border-sky-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-semibold text-amber-400 block mb-0.5">
+                        Commission Charge (₹)
+                      </label>
+                      <input
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={tariff.commissionCharge === 0 ? '' : tariff.commissionCharge}
+                        onChange={(e) =>
+                          setTariff({
+                            ...tariff,
+                            commissionCharge: e.target.value === '' ? 0 : Number(e.target.value),
+                          })
+                        }
+                        className="w-full text-xs py-1.5 px-2 bg-slate-950 border border-amber-500/40 rounded-lg text-amber-300 font-mono font-bold placeholder:text-slate-600 focus:border-amber-400 focus:outline-none"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Pricing Summary Breakdown Card */}
